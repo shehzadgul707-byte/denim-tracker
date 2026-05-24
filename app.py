@@ -119,7 +119,6 @@ if uploaded_file is not None:
                 imported_df["S.no"] = imported_df["S.no"].astype(str).str.strip()
                 imported_df["Ref"] = imported_df["Ref"].astype(str).str.strip()
                 
-                # Strict Validation check for missing values
                 valid_ref_mask = (
                     imported_df["Ref"].notna() & 
                     (imported_df["Ref"] != "") & 
@@ -225,9 +224,8 @@ elif menu == "Main Dashboard Visuals":
     if len(df_master) == 0:
         st.info("Database khali hai. Data load karne ke liye sidebar ya form use karein.")
     else:
-        # FIXED HERE: Using df_master accurately instead of undefined df
-        df_running = df_master[df_master["Status"] != "Submitted to marketing"]
-        df_submitted = df_master[df_master["Status"] == "Submitted to marketing"]
+        df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy()
+        df_submitted = df_master[df_master["Status"] == "Submitted to marketing"].copy()
         
         kpi1, kpi2, kpi3, kpi4 = st.columns(4)
         kpi1.metric("Active Floor Samples", len(df_running))
@@ -310,38 +308,39 @@ elif menu == "Main Dashboard Visuals":
             
         st.divider()
         
-        # --- ACTIVE PROCESS TABLE CONSOLE ---
+        # --- NEW: ACTIVE PROCESS INTERACTIVE DATA EDITOR (WITH INLINE ROW DELETION) ---
         st.subheader("📋 Active Running Process Queue (Horizontal Rows)")
-        st.dataframe(df_running, use_container_width=True)
+        st.caption("💡 Tip: Kisi bhi ghalat/extra row ko delete karne ke liye us row ko select karke apne keyboard se 'Delete' press karein, ya table ke extreme left par check karke delete karein.")
         
-        # --- ACTION SIDE PANELS (INLINE WITH ACTIVE QUEUE) ---
-        st.markdown("🔍 **Active Queue Interactive Row Controls:**")
-        action_col1, action_col2 = st.columns(2)
+        # Using st.data_editor to allow seamless inline row deletions natively
+        edited_running_df = st.data_editor(
+            df_running,
+            use_container_width=True,
+            num_rows="dynamic",  # Enables the built-in trash/delete button for rows
+            key="running_process_editor"
+        )
         
-        with action_col1:
-            st.info("📂 **Option 1: Read Complete Details (Spec Sheet)**")
-            select_view = st.selectbox("Open karne ke liye kisi bhi Active Row ka S.no select karein:", ["-- Choose S.no --"] + df_running["S.no"].tolist(), key="inline_view_select")
-            if st.button("📖 Open To See Complete Detail", use_container_width=True):
-                if select_view != "-- Choose S.no --":
-                    st.session_state.selected_sno_state = select_view
-                    st.rerun()
-                else:
-                    st.error("Pehle aik valid S.no chunein.")
-                    
-        with action_col2:
-            st.warning("🗑️ **Option 2: Delete Row Completely (Invalid Data Run)**")
-            select_del = st.selectbox("Queue se permanently delete karne ke liye target S.no chunein:", ["-- Choose S.no --"] + df_running["S.no"].tolist(), key="inline_del_select")
-            if st.button("🔴 Delete Row Complete", use_container_width=True):
-                if select_del != "-- Choose S.no --":
-                    df_master = df_master[df_master["S.no"] != select_del]
-                    df_trials = df_trials[df_trials["Sample ID"] != select_del]
-                    save_all_sheets(df_master, df_trials)
-                    st.success(f"Row S.no {select_del} data queue aur Excel dono se clear ho gayi!")
-                    if st.session_state.selected_sno_state == select_del:
-                        st.session_state.selected_sno_state = "-- Select Sample --"
-                    st.rerun()
-                else:
-                    st.error("Pehle delete karne ke liye S.no select karein.")
+        # Syncing deletions back to Excel database automatically if row count changes
+        if len(edited_running_df) != len(df_running):
+            remaining_snos = edited_running_df["S.no"].tolist()
+            # Keep rows that are still in edited running queue OR rows that are already submitted (archived)
+            df_master = df_master[(df_master["S.no"].isin(remaining_snos)) | (df_master["Status"] == "Submitted to marketing")]
+            df_trials = df_trials[df_trials["Sample ID"].isin(df_master["S.no"])]
+            save_all_sheets(df_master, df_trials)
+            st.success("🔄 Row database aur Excel sheet se permanently delete ho gayi!")
+            st.rerun()
+        
+        st.divider()
+        
+        # --- ACTION PANEL FOR SPECIFIC DETAILED EXPANSION ---
+        st.info("📂 **Open Complete Profile Sheet View**")
+        select_view = st.selectbox("Jis active sample ki complete specification details dekhni/edit karni hain, uska S.no chunein:", ["-- Choose S.no --"] + df_running["S.no"].tolist(), key="inline_view_select")
+        if st.button("📖 Open To See Complete Detail", use_container_width=True):
+            if select_view != "-- Choose S.no --":
+                st.session_state.selected_sno_state = select_view
+                st.rerun()
+            else:
+                st.error("Pehle aik valid S.no chunein.")
         
         st.divider()
         
