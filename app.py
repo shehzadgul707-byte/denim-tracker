@@ -220,7 +220,7 @@ if menu == "Register New R&D Sample":
 
 # --- OPTION 2: MAIN DASHBOARD & MASTER TABLES ---
 elif menu == "Main Dashboard Visuals":
-    st.header("Pipeline Dashboard Visuals")
+    st.header("实时 Pipeline Dashboard Visuals")
     
     if len(df_master) == 0:
         st.info("Database khali hai. Data load karne ke liye sidebar ya form use karein.")
