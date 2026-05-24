@@ -225,4 +225,215 @@ elif menu == "Main Dashboard Visuals":
     if len(df_master) == 0:
         st.info("Database khali hai. Data load karne ke liye sidebar ya form use karein.")
     else:
-        df_running = df
+        # FIXED HERE: Using df_master accurately instead of undefined df
+        df_running = df_master[df_master["Status"] != "Submitted to marketing"]
+        df_submitted = df_master[df_master["Status"] == "Submitted to marketing"]
+        
+        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+        kpi1.metric("Active Floor Samples", len(df_running))
+        kpi2.metric("Critical Alerts (<=3 Days)", len(df_running[df_running["Alert"].str.contains("Critical", na=False)]))
+        kpi3.metric("Overdue / Delayed Runs", len(df_running[df_running["Alert"].str.contains("Delayed", na=False)]))
+        kpi4.metric("Archived Submission Pool", len(df_submitted))
+        
+        st.divider()
+        
+        # --- FIXED SAMPLE VIEW & EDIT POP-OUT SHEET ---
+        if st.session_state.selected_sno_state != "-- Select Sample --":
+            selected_click_sno = st.session_state.selected_sno_state
+            if selected_click_sno in df_master["S.no"].values:
+                s_idx = df_master[df_master["S.no"] == selected_click_sno].index[0]
+                s_row = df_master.loc[s_idx]
+                
+                with st.expander(f"📖 OPEN SPEC SHEET: SAMPLE S.NO [ {selected_click_sno} ]", expanded=True):
+                    ec1, ec2, ec3 = st.columns(3)
+                    with ec1:
+                        updated_status = st.selectbox("Edit Process Stage:", STATUS_OPTIONS, index=STATUS_OPTIONS.index(s_row["Status"]))
+                        updated_brand = st.text_input("Edit Brand name:", value=str(s_row["Brand"]))
+                        updated_ref = st.text_input("Edit Ref Quality ID:", value=str(s_row["Ref"]))
+                    with ec2:
+                        try: curr_del_date = datetime.strptime(str(s_row["Delivery date"]), "%Y-%m-%d").date()
+                        except: curr_del_date = date.today()
+                        updated_del = st.date_input("Edit Delivery Date:", value=curr_del_date)
+                        updated_finish = st.text_input("Edit Finish Code:", value=str(s_row["Finish"]))
+                        updated_tr = st.text_input("Edit TR Code:", value=str(s_row["TR Code"]))
+                    with ec3:
+                        st.info(f"Days Pending: {s_row['Pending days in process']} days")
+                        st.write(f"Warp Specs: {s_row['Warp']} / Slub: {s_row['Warp Slub']}")
+                        st.write(f"Weft / Shade: {s_row['Weft']} / {s_row['Shade']}")
+                        st.write(f"Reed / PPI: {s_row['Reed']} / {s_row['Ppi']}")
+                    
+                    updated_remarks = st.text_area("Edit Remarks:", value=str(s_row["Remarks"]))
+                    
+                    bc1, bc2 = st.columns(2)
+                    with bc1:
+                        if st.button("💾 Save Changes To Excel", use_container_width=True):
+                            if not updated_ref.strip() or updated_ref.strip().lower() == "nan":
+                                st.error("Error: Ref value khali nahi ho sakti!")
+                            else:
+                                df_master.at[s_idx, "Status"] = updated_status
+                                df_master.at[s_idx, "Brand"] = updated_brand
+                                df_master.at[s_idx, "Ref"] = updated_ref.strip()
+                                df_master.at[s_idx, "Finish"] = updated_finish
+                                df_master.at[s_idx, "Delivery date"] = str(updated_del)
+                                df_master.at[s_idx, "TR Code"] = updated_tr.strip()
+                                df_master.at[s_idx, "Remarks"] = updated_remarks
+                                
+                                if updated_status == "Submitted to marketing" and s_row["Status"] != "Submitted to marketing":
+                                    df_master.at[s_idx, "Ready date"] = str(date.today())
+                                
+                                df_master = calculate_metrics_and_alerts(df_master)
+                                save_all_sheets(df_master, df_trials)
+                                st.success("Changes successfully saved!")
+                                st.session_state.selected_sno_state = "-- Select Sample --"
+                                st.rerun()
+                    with bc2:
+                        if st.button("❌ Close Profile View", use_container_width=True):
+                            st.session_state.selected_sno_state = "-- Select Sample --"
+                            st.rerun()
+            else:
+                st.session_state.selected_sno_state = "-- Select Sample --"
+
+        # Charts section
+        g1, g2 = st.columns(2)
+        with g1:
+            st.subheader("🏭 Running Production Stages Count")
+            status_counts = df_running["Status"].value_counts().reindex(STATUS_OPTIONS[:-1], fill_value=0).reset_index()
+            status_counts.columns = ["Route Stage", "Active Counts"]
+            fig1 = px.bar(status_counts, x="Active Counts", y="Route Stage", orientation="h", color="Active Counts", color_continuous_scale="Viridis", text_auto=True)
+            st.plotly_chart(fig1, use_container_width=True)
+        with g2:
+            st.subheader("🎯 Brand Volume Segregation")
+            brand_counts = df_master["Brand"].value_counts().reset_index()
+            brand_counts.columns = ["Brand Segment", "Total Samples"]
+            fig2 = px.pie(brand_counts, values="Total Samples", names="Brand Segment", hole=0.4, color_discrete_sequence=px.colors.sequential.Tealgrn)
+            st.plotly_chart(fig2, use_container_width=True)
+            
+        st.divider()
+        
+        # --- ACTIVE PROCESS TABLE CONSOLE ---
+        st.subheader("📋 Active Running Process Queue (Horizontal Rows)")
+        st.dataframe(df_running, use_container_width=True)
+        
+        # --- ACTION SIDE PANELS (INLINE WITH ACTIVE QUEUE) ---
+        st.markdown("🔍 **Active Queue Interactive Row Controls:**")
+        action_col1, action_col2 = st.columns(2)
+        
+        with action_col1:
+            st.info("📂 **Option 1: Read Complete Details (Spec Sheet)**")
+            select_view = st.selectbox("Open karne ke liye kisi bhi Active Row ka S.no select karein:", ["-- Choose S.no --"] + df_running["S.no"].tolist(), key="inline_view_select")
+            if st.button("📖 Open To See Complete Detail", use_container_width=True):
+                if select_view != "-- Choose S.no --":
+                    st.session_state.selected_sno_state = select_view
+                    st.rerun()
+                else:
+                    st.error("Pehle aik valid S.no chunein.")
+                    
+        with action_col2:
+            st.warning("🗑️ **Option 2: Delete Row Completely (Invalid Data Run)**")
+            select_del = st.selectbox("Queue se permanently delete karne ke liye target S.no chunein:", ["-- Choose S.no --"] + df_running["S.no"].tolist(), key="inline_del_select")
+            if st.button("🔴 Delete Row Complete", use_container_width=True):
+                if select_del != "-- Choose S.no --":
+                    df_master = df_master[df_master["S.no"] != select_del]
+                    df_trials = df_trials[df_trials["Sample ID"] != select_del]
+                    save_all_sheets(df_master, df_trials)
+                    st.success(f"Row S.no {select_del} data queue aur Excel dono se clear ho gayi!")
+                    if st.session_state.selected_sno_state == select_del:
+                        st.session_state.selected_sno_state = "-- Select Sample --"
+                    st.rerun()
+                else:
+                    st.error("Pehle delete karne ke liye S.no select karein.")
+        
+        st.divider()
+        
+        # --- MASTER DUAL DELETE CONTROL CENTER (SEARCH BY REF. OR TR CODE) ---
+        st.markdown("### 🗂️ Bulk Delete Operations (Search By Ref. or TR Code)")
+        del_tabs1, del_tabs2 = st.tabs(["Search & Delete by Ref (Quality No.)", "Search & Delete by TR Code"])
+        
+        with del_tabs1:
+            ref_list = get_suggestions("Ref")
+            search_ref_target = st.selectbox("Delete karne ke liye Ref (Quality No) select karein:", ["-- Choose Ref to Delete --"] + ref_list)
+            if st.button("🔴 Delete via Ref Quality Group", key="del_ref_btn"):
+                if search_ref_target != "-- Choose Ref to Delete --":
+                    matching_snos = df_master[df_master["Ref"] == search_ref_target]["S.no"].tolist()
+                    df_master = df_master[df_master["Ref"] != search_ref_target]
+                    df_trials = df_trials[~df_trials["Sample ID"].isin(matching_snos)]
+                    save_all_sheets(df_master, df_trials)
+                    st.success(f"Ref '{search_ref_target}' wali saari rows permanently clear ho gayin!")
+                    st.rerun()
+                    
+        with del_tabs2:
+            tr_list = get_suggestions("TR Code")
+            search_tr_target = st.selectbox("Delete karne ke liye TR Code select karein:", ["-- Choose TR Code to Delete --"] + tr_list)
+            if st.button("🔴 Delete via TR Code Match", key="del_tr_btn"):
+                if search_tr_target != "-- Choose TR Code to Delete --":
+                    matching_snos = df_master[df_master["TR Code"] == search_tr_target]["S.no"].tolist()
+                    df_master = df_master[df_master["TR Code"] != search_tr_target]
+                    df_trials = df_trials[~df_trials["Sample ID"].isin(matching_snos)]
+                    save_all_sheets(df_master, df_trials)
+                    st.success(f"TR Code '{search_tr_target}' wali rows database se uda di gayin!")
+                    st.rerun()
+
+        st.divider()
+        st.subheader("📁 Archive Vault: Submitted to Marketing")
+        st.dataframe(df_submitted, use_container_width=True)
+
+# --- OPTION 3: SEARCH & INTERNAL DETAIL VIEWER (TRIALS) ---
+elif menu == "Search & Internal Detail Viewer":
+    st.header("🔍 Technical Spec Sheet & Finishing Trials Config")
+    
+    if len(df_master) == 0:
+        st.warning("No records found.")
+    else:
+        selected_sno = st.selectbox("Select Target S.no:", df_master["S.no"].tolist())
+        sample_idx = df_master[df_master["S.no"] == selected_sno].index[0]
+        row_data = df_master.loc[sample_idx]
+        
+        st.subheader(f"ℹ️ Core Parameters for S.no: {selected_sno}")
+        col_view1, col_view2, col_view3 = st.columns(3)
+        with col_view1:
+            st.write(f"**Brand:** {row_data['Brand']}")
+            st.write(f"**Ref Quality:** {row_data['Ref']}")
+            st.write(f"**TR Code:** {row_data['TR Code']}")
+            st.write(f"**Status:** :blue[{row_data['Status']}]")
+        with col_view2:
+            st.write(f"**Request Date:** {row_data['Request Date']}")
+            st.write(f"**Delivery Target:** {row_data['Delivery date']}")
+            st.write(f"**Pending Days:** {row_data['Pending days in process']} days")
+        with col_view3:
+            st.write(f"**Yarn Specs:** {row_data['Warp']} / {row_data['Weft']}")
+            st.write(f"**Shade / Weave:** {row_data['Shade']} / {row_data['Weave']}")
+            st.write(f"**Reed / PPI:** {row_data['Reed']} / {row_data['Ppi']}")
+            
+        st.divider()
+        st.subheader("🧪 Finishing Details & Trial Tracker")
+        active_trials = df_trials[df_trials["Sample ID"] == selected_sno]
+        
+        if len(active_trials) > 0:
+            for _, t_row in active_trials.iterrows():
+                t_col1, t_col2, t_col3 = st.columns([2, 4, 2])
+                with t_col1: st.markdown(f"**{t_row['Trial Number']}**")
+                with t_col2: st.write(f"Parameters: {t_row['Parameters']}")
+                with t_col3:
+                    if t_row["Status_OK"] == "OK ✅": st.success("Trial OK ✅")
+                    else: st.warning("Pending Run")
+                    
+        with st.form("add_trial_form"):
+            trial_num = st.selectbox("Trial ID:", ["Trial-1 Parameters", "Trial-2 Parameters", "Trial-3 Parameters", "Trial-4 Parameters"])
+            trial_params = st.text_input("Chemical Recipe / Finishing Parameters Settings:")
+            trial_status_ok = st.checkbox("Mark this chemical run as 'Trial OK'?")
+            
+            if st.form_submit_button("Log Finishing Trial"):
+                if trial_params:
+                    match_mask = (df_trials["Sample ID"] == selected_sno) & (df_trials["Trial Number"] == trial_num)
+                    status_str = "OK ✅" if trial_status_ok else "Pending"
+                    
+                    if match_mask.any():
+                        df_trials.loc[match_mask, "Parameters"] = trial_params
+                        df_trials.loc[match_mask, "Status_OK"] = status_str
+                    else:
+                        new_trial_row = {"Sample ID": selected_sno, "Trial Number": trial_num, "Parameters": trial_params, "Status_OK": status_str, "Updated Date": str(date.today())}
+                        df_trials = pd.concat([df_trials, pd.DataFrame([new_trial_row])], ignore_index=True)
+                        
+                    save_all_sheets(df_master, df_trials)
+                    st.success("Finishing Trial catalog updated!")
+                    st.rerun()
