@@ -20,7 +20,9 @@ def load_all_sheets():
         try:
             df_master = pd.read_excel(EXCEL_FILE, sheet_name="Master_Data")
             df_trials = pd.read_excel(EXCEL_FILE, sheet_name="Trial_Data")
-            df_master["S.no"] = df_master["S.no"].astype(str)
+            
+            # Standardize S.no to clean string format to avoid type drops
+            df_master["S.no"] = df_master["S.no"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
             df_master["Ref"] = df_master["Ref"].astype(str).str.strip()
             df_master["TR Code"] = df_master["TR Code"].astype(str).str.strip()
             return df_master, df_trials
@@ -45,6 +47,8 @@ def load_all_sheets():
 
 def save_all_sheets(df_master, df_trials):
     """Saves both dataframes into separate sheets in the same Excel file."""
+    # Ensure S.no is saved cleanly
+    df_master["S.no"] = df_master["S.no"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
         df_master.to_excel(writer, sheet_name="Master_Data", index=False)
         df_trials.to_excel(writer, sheet_name="Trial_Data", index=False)
@@ -68,7 +72,7 @@ def calculate_metrics_and_alerts(df):
         return df
     today = date.today()
     df['Current Date'] = today.strftime("%Y-%m-%d")
-    df["S.no"] = df["S.no"].astype(str)
+    df["S.no"] = df["S.no"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
     
     for idx, row in df.iterrows():
         try:
@@ -116,7 +120,7 @@ if uploaded_file is not None:
             if missing_cols:
                 st.sidebar.error(f"Excel mein yeh columns hona zaroori hain: {missing_cols}")
             else:
-                imported_df["S.no"] = imported_df["S.no"].astype(str).str.strip()
+                imported_df["S.no"] = imported_df["S.no"].astype(str).str.replace(r'\.0$', '', regex=True).str.strip()
                 imported_df["Ref"] = imported_df["Ref"].astype(str).str.strip()
                 
                 valid_ref_mask = (
@@ -128,7 +132,7 @@ if uploaded_file is not None:
                 rejected_rows_count = len(imported_df) - valid_ref_mask.sum()
                 filtered_imported_df = imported_df[valid_ref_mask]
                 
-                new_records = filtered_imported_df[~filtered_imported_df["S.no"].isin(df_master["S.no"])]
+                new_records = filtered_imported_df[~filtered_imported_df["S.no"].astype(str).isin(df_master["S.no"])]
                 
                 if rejected_rows_count > 0:
                     st.sidebar.warning(f"⚠️ {rejected_rows_count} Rows reject ho gayin kyunki unmein 'Ref' missing tha!")
@@ -198,13 +202,14 @@ if menu == "Register New R&D Sample":
         submit_btn = st.form_submit_button("Save Sample Data")
         
         if submit_btn:
-            if not s_no or not brand or not ref_id.strip() or ref_id.strip().lower() == "nan":
+            clean_s_no = str(s_no).split('.')[0].strip()
+            if not clean_s_no or not brand or not ref_id.strip() or ref_id.strip().lower() == "nan":
                 st.error("Fields S.no, Brand, aur Ref ID likhna zaroori hai. Ref khali nahi ho sakta!")
-            elif str(s_no) in df_master["S.no"].values:
-                st.error(f"S.no '{s_no}' pehle se maujood hai! Duplicate blocked.")
+            elif clean_s_no in df_master["S.no"].values:
+                st.error(f"S.no '{clean_s_no}' pehle se maujood hai! Duplicate blocked.")
             else:
                 new_row = {
-                    "S.no": str(s_no), "Brand": brand, "Ref": ref_id.strip(), "Finish": finish_code,
+                    "S.no": clean_s_no, "Brand": brand, "Ref": ref_id.strip(), "Finish": finish_code,
                     "TR Code": tr_code.strip(), "Source": source, "Pending days in process": 0,
                     "Request Date": str(req_date_in), "Current Date": str(date.today()),
                     "Delivery date": str(del_date_in), "Ready date": "", "Status": status_init,
@@ -214,7 +219,7 @@ if menu == "Register New R&D Sample":
                 }
                 df_master = pd.concat([df_master, pd.DataFrame([new_row])], ignore_index=True)
                 save_all_sheets(df_master, df_trials)
-                st.success(f"🎉 Sample {s_no} Excel database mein save ho gaya!")
+                st.success(f"🎉 Sample {clean_s_no} Excel database mein save ho gaya!")
                 st.rerun()
 
 # --- OPTION 2: MAIN DASHBOARD & MASTER TABLES ---
@@ -308,26 +313,33 @@ elif menu == "Main Dashboard Visuals":
             
         st.divider()
         
-        # --- NEW: ACTIVE PROCESS INTERACTIVE DATA EDITOR (WITH INLINE ROW DELETION) ---
+        # --- ACTIVE PROCESS QUEUE WITH ROBUST INLINE DELETION ---
         st.subheader("📋 Active Running Process Queue (Horizontal Rows)")
-        st.caption("💡 Tip: Kisi bhi ghalat/extra row ko delete karne ke liye us row ko select karke apne keyboard se 'Delete' press karein, ya table ke extreme left par check karke delete karein.")
+        st.caption("🗑️ **Row Delete Karne Ka Tarika:** Row ke extreme left pe box ko tick/select karein aur apne keyboard se **'Delete'** (ya Backspace) press kar dein. Wo database aur Excel dono se instantly permanently gayab ho jayegi!")
         
-        # Using st.data_editor to allow seamless inline row deletions natively
+        # Fixed state rendering with clean index matching
         edited_running_df = st.data_editor(
             df_running,
             use_container_width=True,
-            num_rows="dynamic",  # Enables the built-in trash/delete button for rows
+            num_rows="dynamic",
             key="running_process_editor"
         )
         
-        # Syncing deletions back to Excel database automatically if row count changes
+        # STRCT TYPE-SAFE DELETION DETECTOR: 
         if len(edited_running_df) != len(df_running):
-            remaining_snos = edited_running_df["S.no"].tolist()
-            # Keep rows that are still in edited running queue OR rows that are already submitted (archived)
-            df_master = df_master[(df_master["S.no"].isin(remaining_snos)) | (df_master["Status"] == "Submitted to marketing")]
-            df_trials = df_trials[df_trials["Sample ID"].isin(df_master["S.no"])]
+            # Convert both arrays strictly to string list to eliminate .0 or object mismatch
+            remaining_snos = [str(x).split('.')[0].strip() for x in edited_running_df["S.no"].dropna().tolist()]
+            
+            # Filter master data robustly
+            df_master["S.no_clean"] = df_master["S.no"].astype(str).str.split('.').str[0].str.strip()
+            
+            # Keep rows that are still in edited view OR are archived
+            df_master = df_master[(df_master["S.no_clean"].isin(remaining_snos)) | (df_master["Status"] == "Submitted to marketing")].copy()
+            df_master.drop(columns=["S.no_clean"], errors="ignore", inplace=True)
+            
+            df_trials = df_trials[df_trials["Sample ID"].astype(str).str.split('.').str[0].str.strip().isin(df_master["S.no"].tolist())]
+            
             save_all_sheets(df_master, df_trials)
-            st.success("🔄 Row database aur Excel sheet se permanently delete ho gayi!")
             st.rerun()
         
         st.divider()
