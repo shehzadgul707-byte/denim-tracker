@@ -41,10 +41,8 @@ df_master, df_trials = load_all_sheets_clean()
 # If an Excel file is already saved and has rows, we overwrite it with fresh uploads later
 if os.path.exists(EXCEL_FILE) and not st.session_state.get("fresh_uploaded", False):
     try:
-        # Checking file history
         temp_master = pd.read_excel(EXCEL_FILE, sheet_name="Master_Data")
         if len(temp_master) > 0:
-            # We standardize rows if file has data
             temp_master["S.no"] = temp_master["S.no"].astype(str).apply(lambda x: str(x).split('.')[0].strip())
             if "Ppi" in temp_master.columns and "Picks" not in temp_master.columns:
                 temp_master.rename(columns={"Ppi": "Picks"}, inplace=True)
@@ -99,16 +97,61 @@ df_repeat = df_running[df_running["Source"].str.lower().isin(["existing", "produ
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
-# 1st Custom Container: Core Production Indicators
 st.markdown("### 📊 Live Floor Workload Counters")
 kpi_box1, kpi_box2, kpi_box3 = st.columns(3)
 
+# Short clean HTML injections to block layout corruption
+html_floor = f"<div style='background-color:#1E3A8A; padding:20px; border-radius:10px; text-align:center; color:white;'><h2>Total Samples On Floor</h2><p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_running)}</p></div>"
+html_dev = f"<div style='background-color:#0D9488; padding:20px; border-radius:10px; text-align:center; color:white;'><h2>Total Development Section</h2><p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_dev)}</p></div>"
+html_repeat = f"<div style='background-color:#B45309; padding:20px; border-radius:10px; text-align:center; color:white;'><h2>Total Repeat Section</h2><p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_repeat)}</p></div>"
+
 with kpi_box1:
-    html_1 = f"<div style='background-color:#1E3A8A; padding:20px; border-radius:10px; text-align:center; color:white;'><h2>Total Samples On Floor</h2><p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_running)}</p></div>"
-    st.markdown(html_1, unsafe_allow_html=True)
+    st.markdown(html_floor, unsafe_allow_html=True)
 
 with kpi_box2:
-    html_2 = f"<div style='background-color:#0D9488; padding:20px; border-radius:10px; text-align:center; color:white;'><h2>Total Development Section</h2><p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_dev)}</p></div>"
-    st.markdown(html_2, unsafe_allow_html=True)
+    st.markdown(html_dev, unsafe_allow_html=True)
 
-with kpi_
+with kpi_box3:
+    st.markdown(html_repeat, unsafe_allow_html=True)
+
+st.markdown("---")
+
+# --- CLEAR ALL & REFRESH CONTROL PANEL ---
+st.markdown("## ⚙️ Control Panel: Reset and Upload Data")
+cc1, cc2 = st.columns([2, 4])
+with cc1:
+    if st.button("🚨 Wipe Out Everything (Set Dashboard to 0)", use_container_width=True):
+        df_master, df_trials = load_all_sheets_clean()
+        save_all_sheets(df_master, df_trials)
+        st.success("Saara data zero kar diya gaya hai!")
+        st.rerun()
+
+st.markdown("---")
+
+# --- FRESH FILE UPLOAD BLOCK CENTER (REPLACES OLD DATA) ---
+st.markdown("## 📥 Fresh Excel Upload Center")
+with st.container():
+    st.info("💡 Yahan apni Excel sheet select karein aur niche button daba kar data load karein.")
+    uploaded_file = st.file_uploader("Excel (.xlsx) sheet browse karein:", type=["xlsx"], key="fresh_excel_uploader")
+    
+    if uploaded_file is not None:
+        if st.button("🚀 Process & Replace Pipeline Data", use_container_width=True):
+            try:
+                imported_df = pd.read_excel(uploaded_file)
+                required_cols = ["S.no", "Brand", "Ref", "Status"]
+                missing_cols = [c for c in required_cols if c not in imported_df.columns]
+                
+                if missing_cols:
+                    st.error(f"Excel File mein yeh basic headers hona lazmi hain: {missing_cols}")
+                else:
+                    imported_df["S.no"] = imported_df["S.no"].astype(str).apply(lambda x: str(x).split('.')[0].strip())
+                    imported_df["Ref"] = imported_df["Ref"].astype(str).str.strip()
+                    if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns: 
+                        imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
+                    
+                    # Row data filters (valid rows only)
+                    valid_mask = imported_df["Ref"].notna() & (imported_df["Ref"] != "")
+                    filtered_imp = imported_df[valid_mask].copy()
+                    
+                    # Force clean layout arrays
+                    blank_master
