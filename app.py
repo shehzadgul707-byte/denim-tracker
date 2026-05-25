@@ -104,23 +104,11 @@ st.markdown("### 📊 Live Floor Workload Counters")
 kpi_box1, kpi_box2, kpi_box3 = st.columns(3)
 
 with kpi_box1:
-    st.markdown(
-        f"<div style='background-color:#1E3A8A; padding:20px; border-radius:10px; text-align:center; color:white;'>"
-        f"<h2>Total Samples On Floor</h2>"
-        f"<p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_running)}</p>"
-        f"</div>", 
-        unsafe_allow_html=True
-    )
+    html_1 = f"<div style='background-color:#1E3A8A; padding:20px; border-radius:10px; text-align:center; color:white;'><h2>Total Samples On Floor</h2><p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_running)}</p></div>"
+    st.markdown(html_1, unsafe_allow_html=True)
 
 with kpi_box2:
-    st.markdown(
-        f"<div style='background-color:#0D9488; padding:20px; border-radius:10px; text-align:center; color:white;'>"
-        f"<h2>Total Development Section</h2>"
-        f"<p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_dev)}</p>"
-        f"</div>", 
-        unsafe_allow_html=True
-    )
+    html_2 = f"<div style='background-color:#0D9488; padding:20px; border-radius:10px; text-align:center; color:white;'><h2>Total Development Section</h2><p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_dev)}</p></div>"
+    st.markdown(html_2, unsafe_allow_html=True)
 
-with kpi_box3:
-    st.markdown(
-        f"<div style='background-color:#B45309; padding:20
+with kpi_
