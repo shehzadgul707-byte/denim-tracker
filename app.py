@@ -15,39 +15,37 @@ STATUS_OPTIONS = ["Yarn Demand", "Dyeing", "Weaving", "Finishing", "Inspection",
 
 # --- HELPER FUNCTIONS FOR EXCEL HANDLING ---
 def load_all_sheets():
-    """Loads Master and Trial data from Excel, initializing them if file does not exist."""
+    """Initializes an empty master dataframe structure ready for fresh Excel uploads."""
+    # Precise columns order matching user specifications
+    columns_structure = [
+        "S.no", "Brand", "Ref", "Finish", "TR Code", "Source", "Pending Days in Process",
+        "Request Date", "Current Date", "Delivery date", "Ready date", "Status", "Alert",
+        "Warp", "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Picks", "Greige Meters", "Remarks"
+    ]
+    
     if os.path.exists(EXCEL_FILE):
         try:
             df_master = pd.read_excel(EXCEL_FILE, sheet_name="Master_Data")
             df_trials = pd.read_excel(EXCEL_FILE, sheet_name="Trial_Data")
             
-            # Standardize data to clean string format to avoid type drops
+            # Standardize formats cleanly
             df_master["S.no"] = df_master["S.no"].astype(str).apply(lambda x: str(x).split('.')[0].strip())
             df_master["Ref"] = df_master["Ref"].astype(str).str.strip()
             df_master["TR Code"] = df_master["TR Code"].astype(str).str.strip()
             
-            # Ensure proper column headers exist for user requirements (Ppi vs Picks)
-            if "Picks" not in df_master.columns and "Ppi" in df_master.columns:
+            if "Ppi" in df_master.columns and "Picks" not in df_master.columns:
                 df_master.rename(columns={"Ppi": "Picks"}, inplace=True)
                 
-            return df_master, df_trials
+            # Retain only required columns layout
+            for col in columns_structure:
+                if col not in df_master.columns:
+                    df_master[col] = ""
+            return df_master[columns_structure], df_trials
         except Exception:
             pass
             
-    # Standard precise structure requested by the user
-    df_master = pd.DataFrame(columns=[
-        "S.no", "Brand", "Ref", "Finish", "TR Code", "Source", "Pending Days in Process",
-        "Request Date", "Current Date", "Delivery date", "Ready date", "Status", "Alert",
-        "Warp", "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Picks", "Greige Meters", "Remarks"
-    ])
-    df_trials = pd.DataFrame(columns=[
-        "Sample ID", "Trial Number", "Parameters", "Status_OK", "Updated Date"
-    ])
-    
-    with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
-        df_master.to_excel(writer, sheet_name="Master_Data", index=False)
-        df_trials.to_excel(writer, sheet_name="Trial_Data", index=False)
-        
+    df_master = pd.DataFrame(columns=columns_structure)
+    df_trials = pd.DataFrame(columns=["Sample ID", "Trial Number", "Parameters", "Status_OK", "Updated Date"])
     return df_master, df_trials
 
 def save_all_sheets(df_master, df_trials):
@@ -57,14 +55,8 @@ def save_all_sheets(df_master, df_trials):
         df_master.to_excel(writer, sheet_name="Master_Data", index=False)
         df_trials.to_excel(writer, sheet_name="Trial_Data", index=False)
 
-# Load current data state
+# Load current clean/empty state data state
 df_master, df_trials = load_all_sheets()
-
-# Helper to pull unique values for clean auto-suggestions
-def get_suggestions(column_name):
-    if len(df_master) > 0 and column_name in df_master.columns:
-        return [str(x) for x in df_master[column_name].dropna().unique() if str(x).strip() != "" and str(x).lower() != "nan"]
-    return []
 
 # --- AUTOMATIC FORMULA CALCULATIONS ---
 def calculate_metrics_and_alerts(df):
@@ -103,8 +95,7 @@ df_master = calculate_metrics_and_alerts(df_master)
 # Filter active running samples vs archived ones
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy()
 
-# Categorize into Development vs Repeat based on industry source logic
-# 'Scratch' is purely Development. 'Existing' and 'Production beam' fall under Repeat runs.
+# Categorize into Development vs Repeat based on source logic
 df_dev = df_running[df_running["Source"].str.lower() == "scratch"].copy()
 df_repeat = df_running[df_running["Source"].str.lower().isin(["existing", "production beam"])].copy()
 
@@ -145,12 +136,14 @@ with kpi_box3:
 
 st.markdown("---")
 
-# --- FILE UPLOAD BLOCK CENTER ---
-with st.expander("📥 EXCEL FILE BULK DATA IMPORT CENTER", expanded=False):
-    st.markdown("#### Database file upload karke pipeline sync karein")
-    uploaded_file = st.file_uploader("Excel (.xlsx) sheet yahan upload karein:", type=["xlsx"])
+# --- FRESH FILE UPLOAD BLOCK CENTER (REPLACES OLD DATA) ---
+st.markdown("## 📥 Fresh Excel Upload Center")
+with st.container():
+    st.info("💡 Yahan file upload karne se system ka purana data clear ho jayega aur nayi file ka data load ho jayega.")
+    uploaded_file = st.file_uploader("Excel (.xlsx) sheet browse karein:", type=["xlsx"], key="fresh_excel_uploader")
+    
     if uploaded_file is not None:
-        if st.button("Process & Append Excel Rows", use_container_width=True):
+        if st.button("🚀 Process & Replace Pipeline Data", use_container_width=True):
             try:
                 imported_df = pd.read_excel(uploaded_file)
                 required_cols = ["S.no", "Brand", "Ref", "Status"]
@@ -161,25 +154,27 @@ with st.expander("📥 EXCEL FILE BULK DATA IMPORT CENTER", expanded=False):
                 else:
                     imported_df["S.no"] = imported_df["S.no"].astype(str).apply(lambda x: str(x).split('.')[0].strip())
                     imported_df["Ref"] = imported_df["Ref"].astype(str).str.strip()
-                    if "Ppi" in imported_df.columns: imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
+                    if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns: 
+                        imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
                     
-                    # Row data filters
+                    # Row data filters (valid rows only)
                     valid_mask = imported_df["Ref"].notna() & (imported_df["Ref"] != "")
-                    filtered_imp = imported_df[valid_mask]
+                    filtered_imp = imported_df[valid_mask].copy()
                     
-                    new_records = filtered_imp[~filtered_imp["S.no"].astype(str).isin(df_master["S.no"])]
+                    # Create clean dataframe strictly with user specifications
+                    blank_master, clean_trials = load_all_sheets()
                     
-                    if len(new_records) == 0:
-                        st.warning("Excel mein koi naya unique S.no data nahi mila.")
-                    else:
-                        for col in df_master.columns:
-                            if col not in new_records.columns: new_records[col] = ""
-                        new_records = new_records[df_master.columns]
-                        df_master = pd.concat([df_master, new_records], ignore_index=True)
-                        df_master = calculate_metrics_and_alerts(df_master)
-                        save_all_sheets(df_master, df_trials)
-                        st.success(f"🎉 {len(new_records)} Naye samples successfully upload ho gaye!")
-                        st.rerun()
+                    for col in blank_master.columns:
+                        if col not in filtered_imp.columns:
+                            filtered_imp[col] = ""
+                            
+                    final_df = filtered_imp[blank_master.columns].copy()
+                    final_df = calculate_metrics_and_alerts(final_df)
+                    
+                    # Save freshly imported rows as the absolute master data
+                    save_all_sheets(final_df, clean_trials)
+                    st.success(f"🎉 System clean reset! Total {len(final_df)} samples naye Excel file se load ho gaye!")
+                    st.rerun()
             except Exception as e:
                 st.error(f"Processing error: {str(e)}")
 
@@ -187,7 +182,7 @@ st.markdown("---")
 
 # --- LIST OF SAMPLES CONTAINER BOX (3 PARTS) ---
 st.markdown("## 🗂️ List of Active Technical Samples")
-st.caption("🗑️ **Row Delete Karne Ka Tareeka:** Kisi bhi list ke extreme left pe box ko check/tick karein aur keyboard se **'Delete'** dabayein. Data automatic Excel se saaf ho jayega.")
+st.caption("🗑️ **Row Delete Karne Ka Tareeka:** Left side ke extreme box ko check/tick karein aur keyboard se **'Delete'** dabayein. Data instant Excel se permanently delete ho jayega.")
 
 tab_overall, tab_dev, tab_repeat = st.tabs([
     "📋 Part 1: Overall Run Pool (Dono Sections)", 
@@ -198,53 +193,62 @@ tab_overall, tab_dev, tab_repeat = st.tabs([
 # Part 1: Overall Segment Data
 with tab_overall:
     st.markdown("#### Overall Horizontal Database Details")
-    edited_overall_df = st.data_editor(
-        df_running,
-        use_container_width=True,
-        num_rows="dynamic",
-        key="overall_editor_view"
-    )
-    
-    # Inline Deletion Synchronizer Loop
-    if len(edited_overall_df) != len(df_running):
-        remaining_snos = [str(x).split('.')[0].strip() for x in edited_overall_df["S.no"].dropna().tolist()]
-        df_master["S.no_clean"] = df_master["S.no"].apply(lambda x: str(x).split('.')[0].strip())
-        df_master = df_master[(df_master["S.no_clean"].isin(remaining_snos)) | (df_master["Status"] == "Submitted to marketing")].copy()
-        df_master.drop(columns=["S.no_clean"], errors="ignore", inplace=True)
-        save_all_sheets(df_master, df_trials)
-        st.rerun()
+    if len(df_running) == 0:
+        st.info("Filhal floor par koi active sample nahi hai. Uper se Excel file upload karein.")
+    else:
+        edited_overall_df = st.data_editor(
+            df_running,
+            use_container_width=True,
+            num_rows="dynamic",
+            key="overall_editor_view"
+        )
+        
+        # Inline Deletion Synchronizer Loop
+        if len(edited_overall_df) != len(df_running):
+            remaining_snos = [str(x).split('.')[0].strip() for x in edited_overall_df["S.no"].dropna().tolist()]
+            df_master["S.no_clean"] = df_master["S.no"].apply(lambda x: str(x).split('.')[0].strip())
+            df_master = df_master[(df_master["S.no_clean"].isin(remaining_snos)) | (df_master["Status"] == "Submitted to marketing")].copy()
+            df_master.drop(columns=["S.no_clean"], errors="ignore", inplace=True)
+            save_all_sheets(df_master, df_trials)
+            st.rerun()
 
 # Part 2: Development Section Data
 with tab_dev:
     st.markdown("#### Filtered View: Pure R&D Developments (Source: Scratch)")
-    edited_dev_df = st.data_editor(
-        df_dev,
-        use_container_width=True,
-        num_rows="dynamic",
-        key="dev_editor_view"
-    )
-    
-    if len(edited_dev_df) != len(df_dev):
-        deleted_snos = set(df_dev["S.no"].tolist()) - set([str(x).split('.')[0].strip() for x in edited_dev_df["S.no"].dropna().tolist()])
-        df_master = df_master[~df_master["S.no"].astype(str).apply(lambda x: x.split('.')[0].strip()).isin(deleted_snos)]
-        save_all_sheets(df_master, df_trials)
-        st.rerun()
+    if len(df_dev) == 0:
+        st.info("Development section (Source: Scratch) mein koi data nahi hai.")
+    else:
+        edited_dev_df = st.data_editor(
+            df_dev,
+            use_container_width=True,
+            num_rows="dynamic",
+            key="dev_editor_view"
+        )
+        
+        if len(edited_dev_df) != len(df_dev):
+            deleted_snos = set(df_dev["S.no"].tolist()) - set([str(x).split('.')[0].strip() for x in edited_dev_df["S.no"].dropna().tolist()])
+            df_master = df_master[~df_master["S.no"].astype(str).apply(lambda x: x.split('.')[0].strip()).isin(deleted_snos)]
+            save_all_sheets(df_master, df_trials)
+            st.rerun()
 
 # Part 3: Repeat Section Data
 with tab_repeat:
     st.markdown("#### Filtered View: Repeat Runs (Source: Existing / Production Beam)")
-    edited_repeat_df = st.data_editor(
-        df_repeat,
-        use_container_width=True,
-        num_rows="dynamic",
-        key="repeat_editor_view"
-    )
-    
-    if len(edited_repeat_df) != len(df_repeat):
-        deleted_snos = set(df_repeat["S.no"].tolist()) - set([str(x).split('.')[0].strip() for x in edited_repeat_df["S.no"].dropna().tolist()])
-        df_master = df_master[~df_master["S.no"].astype(str).apply(lambda x: x.split('.')[0].strip()).isin(deleted_snos)]
-        save_all_sheets(df_master, df_trials)
-        st.rerun()
+    if len(df_repeat) == 0:
+        st.info("Repeat section (Source: Existing / Production Beam) mein koi data nahi hai.")
+    else:
+        edited_repeat_df = st.data_editor(
+            df_repeat,
+            use_container_width=True,
+            num_rows="dynamic",
+            key="repeat_editor_view"
+        )
+        
+        if len(edited_repeat_df) != len(df_repeat):
+            deleted_snos = set(df_repeat["S.no"].tolist()) - set([str(x).split('.')[0].strip() for x in edited_repeat_df["S.no"].dropna().tolist()])
+            df_master = df_master[~df_master["S.no"].astype(str).apply(lambda x: x.split('.')[0].strip()).isin(deleted_snos)]
+            save_all_sheets(df_master, df_trials)
+            st.rerun()
 
 st.markdown("---")
 
@@ -289,7 +293,6 @@ with st.form("manual_sample_entry_container", clear_on_submit=True):
         elif clean_s_no in df_master["S.no"].values:
             st.error(f"S.no '{clean_s_no}' database mein pehle se chal raha hai! Duplicate block kar diya gaya.")
         else:
-            # Build new structured record array precisely matching user layout
             new_row = {
                 "S.no": clean_s_no, "Brand": brand, "Ref": ref_id.strip(), "Finish": finish_code,
                 "TR Code": tr_code.strip(), "Source": source, "Pending Days in Process": 0,
