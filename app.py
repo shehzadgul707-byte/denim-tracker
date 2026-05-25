@@ -4,7 +4,7 @@ import plotly.express as px
 from datetime import datetime, date
 import os
 
-# Set layout to wide for dashboard
+# Set layout to wide for professional R&D dashboard look
 st.set_page_config(page_title="Denim R&D Advanced Tracker", layout="wide")
 
 EXCEL_FILE = "Denim_Master_Database.xlsx"
@@ -21,19 +21,24 @@ def load_all_sheets():
             df_master = pd.read_excel(EXCEL_FILE, sheet_name="Master_Data")
             df_trials = pd.read_excel(EXCEL_FILE, sheet_name="Trial_Data")
             
-            # Standardize S.no to clean string format to avoid type drops
+            # Standardize data to clean string format to avoid type drops
             df_master["S.no"] = df_master["S.no"].astype(str).apply(lambda x: str(x).split('.')[0].strip())
             df_master["Ref"] = df_master["Ref"].astype(str).str.strip()
             df_master["TR Code"] = df_master["TR Code"].astype(str).str.strip()
+            
+            # Ensure proper column headers exist for user requirements (Ppi vs Picks)
+            if "Picks" not in df_master.columns and "Ppi" in df_master.columns:
+                df_master.rename(columns={"Ppi": "Picks"}, inplace=True)
+                
             return df_master, df_trials
         except Exception:
             pass
             
+    # Standard precise structure requested by the user
     df_master = pd.DataFrame(columns=[
-        "S.no", "Brand", "Ref", "Finish", "TR Code", "Source", "Pending days in process",
+        "S.no", "Brand", "Ref", "Finish", "TR Code", "Source", "Pending Days in Process",
         "Request Date", "Current Date", "Delivery date", "Ready date", "Status", "Alert",
-        "Warp", "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Ppi", "Greige mtrs",
-        "Marketing requested meter", "Remarks"
+        "Warp", "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Picks", "Greige Meters", "Remarks"
     ])
     df_trials = pd.DataFrame(columns=[
         "Sample ID", "Trial Number", "Parameters", "Status_OK", "Updated Date"
@@ -47,7 +52,6 @@ def load_all_sheets():
 
 def save_all_sheets(df_master, df_trials):
     """Saves both dataframes into separate sheets in the same Excel file."""
-    # Ensure S.no is saved cleanly
     df_master["S.no"] = df_master["S.no"].astype(str).apply(lambda x: str(x).split('.')[0].strip())
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
         df_master.to_excel(writer, sheet_name="Master_Data", index=False)
@@ -62,10 +66,6 @@ def get_suggestions(column_name):
         return [str(x) for x in df_master[column_name].dropna().unique() if str(x).strip() != "" and str(x).lower() != "nan"]
     return []
 
-# Initialize Session State to remember clicked samples
-if "selected_sno_state" not in st.session_state:
-    st.session_state.selected_sno_state = "-- Select Sample --"
-
 # --- AUTOMATIC FORMULA CALCULATIONS ---
 def calculate_metrics_and_alerts(df):
     if len(df) == 0:
@@ -77,18 +77,18 @@ def calculate_metrics_and_alerts(df):
     for idx, row in df.iterrows():
         try:
             req_date = pd.to_datetime(row['Request Date']).date()
-            df.at[idx, 'Pending days in process'] = (today - req_date).days
+            df.at[idx, 'Pending Days in Process'] = (today - req_date).days
         except:
-            df.at[idx, 'Pending days in process'] = 0
+            df.at[idx, 'Pending Days in Process'] = 0
             
         if row['Status'] != "Submitted to marketing":
             try:
                 del_date = pd.to_datetime(row['Delivery date']).date()
                 days_left = (del_date - today).days
                 if days_left <= 3 and days_left >= 0:
-                    df.at[idx, 'Alert'] = "⚠️ Critical (3 Days or Less)"
+                    df.at[idx, 'Alert'] = "⚠️ Critical"
                 elif days_left < 0:
-                    df.at[idx, 'Alert'] = "🚨 Delayed/Overdue"
+                    df.at[idx, 'Alert'] = "🚨 Overdue"
                 else:
                     df.at[idx, 'Alert'] = "Normal"
             except:
@@ -100,139 +100,213 @@ def calculate_metrics_and_alerts(df):
 
 df_master = calculate_metrics_and_alerts(df_master)
 
-# --- NAVIGATION CONTROLS ---
-st.title("👖 Denim R&D Sample Tracker & Quality Dashboard")
-st.divider()
+# Filter active running samples vs archived ones
+df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy()
 
-# --- SIDEBAR: IMPORT DATA (EXCEL & IMAGE) ---
-st.sidebar.header("⚙️ Data Import Center")
+# Categorize into Development vs Repeat based on industry source logic
+# 'Scratch' is purely Development. 'Existing' and 'Production beam' fall under Repeat runs.
+df_dev = df_running[df_running["Source"].str.lower() == "scratch"].copy()
+df_repeat = df_running[df_running["Source"].str.lower().isin(["existing", "production beam"])].copy()
 
-# 1. Bulk Excel Import with Validation
-st.sidebar.subheader("📥 Excel File Se Data Utayein")
-uploaded_file = st.sidebar.file_uploader("Excel (.xlsx) file browse karein:", type=["xlsx"])
-if uploaded_file is not None:
-    if st.sidebar.button("Process & Import Excel"):
-        try:
-            imported_df = pd.read_excel(uploaded_file)
-            required_cols = ["S.no", "Brand", "Ref", "Status"]
-            missing_cols = [c for c in required_cols if c not in imported_df.columns]
-            
-            if missing_cols:
-                st.sidebar.error(f"Excel mein yeh columns hona zaroori hain: {missing_cols}")
-            else:
-                imported_df["S.no"] = imported_df["S.no"].astype(str).apply(lambda x: str(x).split('.')[0].strip())
-                imported_df["Ref"] = imported_df["Ref"].astype(str).str.strip()
+# --- TOP MAIN HEADINGS & METRIC BOXES ---
+st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
+st.markdown("---")
+
+# 1st Custom Container: Core Production Indicators
+st.markdown("### 📊 Live Floor Workload Counters")
+kpi_box1, kpi_box2, kpi_box3 = st.columns(3)
+
+with kpi_box1:
+    st.markdown(
+        f"<div style='background-color:#1E3A8A; padding:20px; border-radius:10px; text-align:center; color:white;'>"
+        f"<h2>Total Samples On Floor</h2>"
+        f"<p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_running)}</p>"
+        f"</div>", 
+        unsafe_with_html=True
+    )
+
+with kpi_box2:
+    st.markdown(
+        f"<div style='background-color:#0D9488; padding:20px; border-radius:10px; text-align:center; color:white;'>"
+        f"<h2>Total Development Section</h2>"
+        f"<p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_dev)}</p>"
+        f"</div>", 
+        unsafe_with_html=True
+    )
+
+with kpi_box3:
+    st.markdown(
+        f"<div style='background-color:#B45309; padding:20px; border-radius:10px; text-align:center; color:white;'>"
+        f"<h2>Total Repeat Section</h2>"
+        f"<p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_repeat)}</p>"
+        f"</div>", 
+        unsafe_with_html=True
+    )
+
+st.markdown("---")
+
+# --- FILE UPLOAD BLOCK CENTER ---
+with st.expander("📥 EXCEL FILE BULK DATA IMPORT CENTER", expanded=False):
+    st.markdown("#### Database file upload karke pipeline sync karein")
+    uploaded_file = st.file_uploader("Excel (.xlsx) sheet yahan upload karein:", type=["xlsx"])
+    if uploaded_file is not None:
+        if st.button("Process & Append Excel Rows", use_container_width=True):
+            try:
+                imported_df = pd.read_excel(uploaded_file)
+                required_cols = ["S.no", "Brand", "Ref", "Status"]
+                missing_cols = [c for c in required_cols if c not in imported_df.columns]
                 
-                valid_ref_mask = (
-                    imported_df["Ref"].notna() & 
-                    (imported_df["Ref"] != "") & 
-                    (~imported_df["Ref"].isin(["nan", "NaN", "NAN"]))
-                )
-                
-                rejected_rows_count = len(imported_df) - valid_ref_mask.sum()
-                filtered_imported_df = imported_df[valid_ref_mask]
-                
-                new_records = filtered_imported_df[~filtered_imported_df["S.no"].astype(str).isin(df_master["S.no"])]
-                
-                if rejected_rows_count > 0:
-                    st.sidebar.warning(f"⚠️ {rejected_rows_count} Rows reject ho gayin kyunki unmein 'Ref' missing tha!")
-                
-                if len(new_records) == 0:
-                    st.sidebar.warning("Sheet mein koi naya unique S.no nahi mila.")
+                if missing_cols:
+                    st.error(f"Excel File mein yeh basic headers hona lazmi hain: {missing_cols}")
                 else:
-                    for col in df_master.columns:
-                        if col not in new_records.columns: new_records[col] = ""
-                    new_records = new_records[df_master.columns]
-                    df_master = pd.concat([df_master, new_records], ignore_index=True)
-                    df_master = calculate_metrics_and_alerts(df_master)
-                    save_all_sheets(df_master, df_trials)
-                    st.sidebar.success(f"🎉 {len(new_records)} Naye samples successfully import ho gaye!")
-                    st.rerun()
-        except Exception as e:
-            st.sidebar.error(f"Import failed: {str(e)}")
+                    imported_df["S.no"] = imported_df["S.no"].astype(str).apply(lambda x: str(x).split('.')[0].strip())
+                    imported_df["Ref"] = imported_df["Ref"].astype(str).str.strip()
+                    if "Ppi" in imported_df.columns: imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
+                    
+                    # Row data filters
+                    valid_mask = imported_df["Ref"].notna() & (imported_df["Ref"] != "")
+                    filtered_imp = imported_df[valid_mask]
+                    
+                    new_records = filtered_imp[~filtered_imp["S.no"].astype(str).isin(df_master["S.no"])]
+                    
+                    if len(new_records) == 0:
+                        st.warning("Excel mein koi naya unique S.no data nahi mila.")
+                    else:
+                        for col in df_master.columns:
+                            if col not in new_records.columns: new_records[col] = ""
+                        new_records = new_records[df_master.columns]
+                        df_master = pd.concat([df_master, new_records], ignore_index=True)
+                        df_master = calculate_metrics_and_alerts(df_master)
+                        save_all_sheets(df_master, df_trials)
+                        st.success(f"🎉 {len(new_records)} Naye samples successfully upload ho gaye!")
+                        st.rerun()
+            except Exception as e:
+                st.error(f"Processing error: {str(e)}")
 
-# 2. Picture / OCR Data Extraction
-st.sidebar.subheader("📷 Picture Se Data Utayein (OCR)")
-uploaded_img = st.sidebar.file_uploader("Sample Card ya Specs ki photo upload karein:", type=["png", "jpg", "jpeg"])
-if uploaded_img is not None:
-    st.sidebar.info("Scanning image text... (Ref verification active)")
-    mock_scanned_text = f"Scanned from {uploaded_img.name}:\nBrand: Natasha\nRef: REF-772\nWarp: 10 OE\nWeft: 12 Ring\nReed: 72\nPpi: 52\nShade: Deep Indigo\nWeave: 3/1 RHT\nTR Code: TR-990"
-    st.sidebar.text_area("Scanned Data Raw Result:", value=mock_scanned_text, height=150)
+st.markdown("---")
+
+# --- LIST OF SAMPLES CONTAINER BOX (3 PARTS) ---
+st.markdown("## 🗂️ List of Active Technical Samples")
+st.caption("🗑️ **Row Delete Karne Ka Tareeka:** Kisi bhi list ke extreme left pe box ko check/tick karein aur keyboard se **'Delete'** dabayein. Data automatic Excel se saaf ho jayega.")
+
+tab_overall, tab_dev, tab_repeat = st.tabs([
+    "📋 Part 1: Overall Run Pool (Dono Sections)", 
+    "🧪 Part 2: Development Section Details", 
+    "🔄 Part 3: Repeat Section Details"
+])
+
+# Part 1: Overall Segment Data
+with tab_overall:
+    st.markdown("#### Overall Horizontal Database Details")
+    edited_overall_df = st.data_editor(
+        df_running,
+        use_container_width=True,
+        num_rows="dynamic",
+        key="overall_editor_view"
+    )
     
-    if "Ref:" in mock_scanned_text:
-        st.sidebar.success("✅ Ref Quality No. detected in image.")
-    else:
-        st.sidebar.error("❌ Ref Quality missing in scanned text.")
+    # Inline Deletion Synchronizer Loop
+    if len(edited_overall_df) != len(df_running):
+        remaining_snos = [str(x).split('.')[0].strip() for x in edited_overall_df["S.no"].dropna().tolist()]
+        df_master["S.no_clean"] = df_master["S.no"].apply(lambda x: str(x).split('.')[0].strip())
+        df_master = df_master[(df_master["S.no_clean"].isin(remaining_snos)) | (df_master["Status"] == "Submitted to marketing")].copy()
+        df_master.drop(columns=["S.no_clean"], errors="ignore", inplace=True)
+        save_all_sheets(df_master, df_trials)
+        st.rerun()
 
-st.sidebar.divider()
-menu = st.sidebar.radio("Navigation Menu:", ["Main Dashboard Visuals", "Register New R&D Sample", "Search & Internal Detail Viewer"])
-
-# --- OPTION 1: REGISTER NEW SAMPLE FORM ---
-if menu == "Register New R&D Sample":
-    st.header("📋 New Sample Quality Specification Input Form")
+# Part 2: Development Section Data
+with tab_dev:
+    st.markdown("#### Filtered View: Pure R&D Developments (Source: Scratch)")
+    edited_dev_df = st.data_editor(
+        df_dev,
+        use_container_width=True,
+        num_rows="dynamic",
+        key="dev_editor_view"
+    )
     
-    with st.form("sample_entry_form"):
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            s_no = st.text_input("S.no (Manual Entry)*")
-            brand = st.text_input("Brand Name", help="Suggestions: " + ", ".join(get_suggestions("Brand")[:5]))
-            ref_id = st.text_input("Ref / Quality No (Mandatory)*")
-            finish_code = st.text_input("Finish Code")
-            tr_code = st.text_input("TR Code")
-            source = st.selectbox("Source Route Selection:", SOURCE_OPTIONS)
-            
-        with col2:
-            req_date_in = st.date_input("Request Date:", value=date.today())
-            del_date_in = st.date_input("Delivery Date:")
-            status_init = st.selectbox("Current Status Stage:", STATUS_OPTIONS)
-            remarks = st.text_area("Remarks / Instructions:")
-            
-        with col3:
-            warp_txt = st.text_input("Warp", help="Suggestions: " + ", ".join(get_suggestions("Warp")[:4]))
-            w_slub_txt = st.text_input("Warp Slub")
-            weft_txt = st.text_input("Weft")
-            shade_txt = st.text_input("Shade")
-            weave_txt = st.text_input("Weave Pattern")
-            reed_txt = st.text_input("Reed")
-            ppi_txt = st.text_input("PPI")
-            greige_mtrs = st.text_input("Greige Meters")
-            mkt_mtrs = st.text_input("Marketing Requested Meters")
-            
-        submit_btn = st.form_submit_button("Save Sample Data")
-        
-        if submit_btn:
-            clean_s_no = str(s_no).split('.')[0].strip()
-            if not clean_s_no or not brand or not ref_id.strip() or ref_id.strip().lower() == "nan":
-                st.error("Fields S.no, Brand, aur Ref ID likhna zaroori hai. Ref khali nahi ho sakta!")
-            elif clean_s_no in df_master["S.no"].values:
-                st.error(f"S.no '{clean_s_no}' pehle se maujood hai! Duplicate blocked.")
-            else:
-                new_row = {
-                    "S.no": clean_s_no, "Brand": brand, "Ref": ref_id.strip(), "Finish": finish_code,
-                    "TR Code": tr_code.strip(), "Source": source, "Pending days in process": 0,
-                    "Request Date": str(req_date_in), "Current Date": str(date.today()),
-                    "Delivery date": str(del_date_in), "Ready date": "", "Status": status_init,
-                    "Alert": "Normal", "Warp": warp_txt, "Warp Slub": w_slub_txt, "Weft": weft_txt,
-                    "Shade": shade_txt, "Weave": weave_txt, "Reed": reed_txt, "Ppi": ppi_txt,
-                    "Greige mtrs": greige_mtrs, "Marketing requested meter": mkt_mtrs, "Remarks": remarks
-                }
-                df_master = pd.concat([df_master, pd.DataFrame([new_row])], ignore_index=True)
-                save_all_sheets(df_master, df_trials)
-                st.success(f"🎉 Sample {clean_s_no} Excel database mein save ho gaya!")
-                st.rerun()
+    if len(edited_dev_df) != len(df_dev):
+        deleted_snos = set(df_dev["S.no"].tolist()) - set([str(x).split('.')[0].strip() for x in edited_dev_df["S.no"].dropna().tolist()])
+        df_master = df_master[~df_master["S.no"].astype(str).apply(lambda x: x.split('.')[0].strip()).isin(deleted_snos)]
+        save_all_sheets(df_master, df_trials)
+        st.rerun()
 
-# --- OPTION 2: MAIN DASHBOARD & MASTER TABLES ---
-elif menu == "Main Dashboard Visuals":
-    st.header("实时 Pipeline Dashboard Visuals")
+# Part 3: Repeat Section Data
+with tab_repeat:
+    st.markdown("#### Filtered View: Repeat Runs (Source: Existing / Production Beam)")
+    edited_repeat_df = st.data_editor(
+        df_repeat,
+        use_container_width=True,
+        num_rows="dynamic",
+        key="repeat_editor_view"
+    )
     
-    if len(df_master) == 0:
-        st.info("Database khali hai. Data load karne ke liye sidebar ya form use karein.")
-    else:
-        df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy()
-        df_submitted = df_master[df_master["Status"] == "Submitted to marketing"].copy()
+    if len(edited_repeat_df) != len(df_repeat):
+        deleted_snos = set(df_repeat["S.no"].tolist()) - set([str(x).split('.')[0].strip() for x in edited_repeat_df["S.no"].dropna().tolist()])
+        df_master = df_master[~df_master["S.no"].astype(str).apply(lambda x: x.split('.')[0].strip()).isin(deleted_snos)]
+        save_all_sheets(df_master, df_trials)
+        st.rerun()
+
+st.markdown("---")
+
+# --- MANUAL NEW SAMPLE ENTRY INPUT FORM CONTAINER ---
+st.markdown("## 📥 Box: New Sample Manual Entry Section")
+
+with st.form("manual_sample_entry_container", clear_on_submit=True):
+    st.markdown("#### Enter Quality Specifications Below to Add into Excel Directly:")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        s_no = st.text_input("S.no (Manual Primary Key)*")
+        brand = st.text_input("Brand Name")
+        ref_id = st.text_input("Ref / Quality No (Mandatory)*")
+        finish_code = st.text_input("Finish Code")
+        tr_code = st.text_input("TR Code")
+        source = st.selectbox("Source (Select Scratch for Development Run):", SOURCE_OPTIONS)
         
-        kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-        kpi1.metric("Active Floor Samples", len(df_running))
-        kpi2.metric("Critical Alerts (<=3 Days)", len(df_running[df_running["Alert"].str.contains("Critical", na=False)]))
-        kpi3.metric("Overdue / Delayed Runs", len(df_running
+    with col2:
+        req_date_in = st.date_input("Request Date:", value=date.today())
+        del_date_in = st.date_input("Delivery Date Target:")
+        status_init = st.selectbox("Current Status Stage:", STATUS_OPTIONS)
+        remarks = st.text_area("Remarks / Mill Instructions:")
+        
+    with col3:
+        warp_txt = st.text_input("Warp Specs")
+        w_slub_txt = st.text_input("Warp Slub")
+        weft_txt = st.text_input("Weft Specs")
+        shade_txt = st.text_input("Shade Type")
+        weave_txt = st.text_input("Weave Pattern")
+        reed_txt = st.text_input("Reed")
+        picks_txt = st.text_input("Picks (PPI)")
+        greige_mtrs = st.text_input("Greige Meters")
+        
+    submit_btn = st.form_submit_button("💾 Save Manual Record To Excel Database", use_container_width=True)
+    
+    if submit_btn:
+        clean_s_no = str(s_no).split('.')[0].strip()
+        if not clean_s_no or not ref_id.strip() or ref_id.strip().lower() == "nan":
+            st.error("Fields 'S.no' aur 'Ref' Quality likhna zaroori hai. Inke bagair record block ho jayega!")
+        elif clean_s_no in df_master["S.no"].values:
+            st.error(f"S.no '{clean_s_no}' database mein pehle se chal raha hai! Duplicate block kar diya gaya.")
+        else:
+            # Build new structured record array precisely matching user layout
+            new_row = {
+                "S.no": clean_s_no, "Brand": brand, "Ref": ref_id.strip(), "Finish": finish_code,
+                "TR Code": tr_code.strip(), "Source": source, "Pending Days in Process": 0,
+                "Request Date": str(req_date_in), "Current Date": str(date.today()),
+                "Delivery date": str(del_date_in), "Ready date": "", "Status": status_init,
+                "Alert": "Normal", "Warp": warp_txt, "Warp Slub": w_slub_txt, "Weft": weft_txt,
+                "Shade": shade_txt, "Weave": weave_txt, "Reed": reed_txt, "Picks": picks_txt,
+                "Greige Meters": greige_mtrs, "Remarks": remarks
+            }
+            df_master = pd.concat([df_master, pd.DataFrame([new_row])], ignore_index=True)
+            df_master = calculate_metrics_and_alerts(df_master)
+            save_all_sheets(df_master, df_trials)
+            st.success(f"🎉 Sample S.no {clean_s_no} master database mein add ho kar sync ho gaya!")
+            st.rerun()
+
+st.markdown("---")
+# Archive table rendering for finalized logs at the very bottom
+st.subheader("📁 Complete Closed Archive Pool (Submitted to Marketing)")
+df_submitted = df_master[df_master["Status"] == "Submitted to marketing"].copy()
+st.dataframe(df_submitted, use_container_width=True)
