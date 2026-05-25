@@ -122,7 +122,7 @@ with kpi_box1:
         f"<h2>Total Samples On Floor</h2>"
         f"<p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_running)}</p>"
         f"</div>", 
-        unsafe_with_html=True
+        unsafe_allow_html=True
     )
 
 with kpi_box2:
@@ -131,7 +131,7 @@ with kpi_box2:
         f"<h2>Total Development Section</h2>"
         f"<p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_dev)}</p>"
         f"</div>", 
-        unsafe_with_html=True
+        unsafe_allow_html=True
     )
 
 with kpi_box3:
@@ -140,7 +140,7 @@ with kpi_box3:
         f"<h2>Total Repeat Section</h2>"
         f"<p style='font-size:35px; font-weight:bold; margin:0;'>{len(df_repeat)}</p>"
         f"</div>", 
-        unsafe_with_html=True
+        unsafe_allow_html=True
     )
 
 st.markdown("---")
