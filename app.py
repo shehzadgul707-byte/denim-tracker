@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
+from datetime import date
 import os
 import plotly.express as px
 
@@ -10,7 +10,7 @@ EXCEL_FILE = "Denim_Master_Database.xlsx"
 
 STATUS_OPTIONS = ["Yarn Demand", "Dyeing", "Weaving", "Finishing", "Inspection", "Submitted to marketing"]
 
-# Standard fixed columns structure to prevent missing column errors
+# Standard fixed columns structure precisely matching user specs
 COLUMNS_STRUCTURE = [
     "S.no", "Brand", "Ref", "Finish", "TR Code", "Source", "Pending Days in Process",
     "Request Date", "Current Date", "Delivery date", "Ready date", "Status", "Alert",
@@ -23,18 +23,15 @@ if "fresh_uploaded" not in st.session_state:
 # ====================== HELPERS ======================
 def clean_dataframe(df):
     df = df.copy()
-    # Ensure all baseline columns exist
     for col in COLUMNS_STRUCTURE:
         if col not in df.columns:
             df[col] = ""
-    # Standardize spaces and text formats
     for col in df.columns:
         df[col] = df[col].fillna("").astype(str).str.strip()
     return df[COLUMNS_STRUCTURE]
 
 def save_all_sheets(df_master):
     df_master = clean_dataframe(df_master)
-    # Respect the existing Category data instead of overriding it via Source
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
         df_master.to_excel(writer, sheet_name="Master_Data", index=False)
 
@@ -46,14 +43,13 @@ def calculate_metrics_and_alerts(df):
     df['Current Date'] = today.strftime("%Y-%m-%d")
     
     for idx in df.index:
-        # 1. Clear floating points from serial numbers
         sno_raw = str(df.at[idx, 'S.no']).split('.')[0].strip()
         df.at[idx, 'S.no'] = sno_raw
 
-        # 2. Running Days Calculation
+        # Running Days Calculation
         try:
             req_val = df.at[idx, 'Request Date']
-            if req_val and str(req_val).lower() != "nat" and str(req_val).lower() != "nan":
+            if req_val and str(req_val).lower() not in ["nat", "nan", ""]:
                 req_date = pd.to_datetime(req_val).date()
                 df.at[idx, 'Pending Days in Process'] = str((today - req_date).days)
             else:
@@ -61,12 +57,12 @@ def calculate_metrics_and_alerts(df):
         except:
             df.at[idx, 'Pending Days in Process'] = "0"
         
-        # 3. Critical Alert System
+        # Critical Alert System
         status = str(df.at[idx, 'Status']).strip()
         if status != "Submitted to marketing":
             try:
                 del_val = df.at[idx, 'Delivery date']
-                if del_val and str(del_val).lower() != "nat" and str(del_val).lower() != "nan":
+                if del_val and str(del_val).lower() not in ["nat", "nan", ""]:
                     del_date = pd.to_datetime(del_val).date()
                     days_left = (del_date - today).days
                     if days_left <= 3 and days_left >= 0:
@@ -141,15 +137,12 @@ st.markdown("---")
 
 # ====================== DYNAMIC PIPELINE FILTERS ======================
 df_master = calculate_metrics_and_alerts(df_master)
-
-# Separate active running samples from complete marketing archive
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy()
 
-# Strictly filter segments strictly by explicit text values inside 'Category' column
 df_dev = df_running[df_running["Category"].str.lower().str.contains("development", na=False)].copy()
 df_repeat = df_running[df_running["Category"].str.lower().str.contains("repeat", na=False)].copy()
 
-# ====================== DASHBOARD KPI & PLOTLY CHARTS ======================
+# ====================== DASHBOARD KPI & CHARTS ======================
 st.markdown("### 📊 Live R&D Floor Workload Indicators")
 kpi1, kpi2, kpi3 = st.columns([1, 2, 2])
 
@@ -185,12 +178,12 @@ with kpi3:
 
 st.markdown("---")
 
-# ====================== SAFE EDIT FORM SECTION ======================
-st.subheader("✏️ Quick Search & Technical Edit Form")
+# ====================== THE PERFECT 23-PARAMETER EDIT FORM ======================
+st.subheader("✏️ Search & Complete Technical Specification Editor")
 
 if len(df_running) > 0:
     df_running["Display"] = df_running["S.no"].astype(str) + " - [Ref: " + df_running["Ref"].astype(str) + "] - " + df_running["Brand"].astype(str)
-    selected_display = st.selectbox("Select Sample Target to Overwrite:", options=df_running["Display"].tolist())
+    selected_display = st.selectbox("Select Sample Target to Edit ALL Fields:", options=df_running["Display"].tolist())
     
     if selected_display:
         selected_sno = selected_display.split(" - ")[0].strip()
@@ -199,77 +192,98 @@ if len(df_running) > 0:
         if not sample_row.empty:
             sample = sample_row.iloc[0]
             
-            with st.form("edit_sample_form_secure"):
+            with st.form("edit_sample_form_secure_all_23_fields"):
                 st.markdown(f"⚙️ **Editing Specifications For Sample S.no: `{selected_sno}`**")
-                col1, col2, col3 = st.columns(3)
+                
+                col1, col2, col3, col4 = st.columns(4)
                 
                 with col1:
-                    brand = st.text_input("Brand", value=sample.get("Brand", ""))
-                    ref = st.text_input("Ref Quality No", value=sample.get("Ref", ""))
+                    st.markdown("##### 📁 Section 1: Core Identity")
+                    new_sno = st.text_input("S.no (Manual Serial)", value=sample.get("S.no", ""))
+                    brand = st.text_input("Brand / Customer Name", value=sample.get("Brand", ""))
+                    ref = st.text_input("Ref / Quality ID", value=sample.get("Ref", ""))
                     finish = st.text_input("Finish Type", value=sample.get("Finish", ""))
                     tr_code = st.text_input("TR Code", value=sample.get("TR Code", ""))
-                    source = st.text_input("Source", value=sample.get("Source", ""))
-                
+                    source = st.text_input("Source / Fabric Route", value=sample.get("Source", ""))
+
                 with col2:
-                    # Let the user completely change the Category regardless of what Source is entered
+                    st.markdown("##### 📅 Section 2: Management & Dates")
+                    status = st.selectbox("Pipeline Status Stage", STATUS_OPTIONS, 
+                                          index=STATUS_OPTIONS.index(sample.get("Status")) if sample.get("Status") in STATUS_OPTIONS else 0)
+                    
                     cat_val = str(sample.get("Category", "Development")).lower().strip()
                     cat_idx = 0 if "development" in cat_val else 1
                     category = st.selectbox("Category Group", ["Development", "Repeat"], index=cat_idx)
                     
-                    status = st.selectbox("Pipeline Status Stage", STATUS_OPTIONS, 
-                                          index=STATUS_OPTIONS.index(sample.get("Status")) if sample.get("Status") in STATUS_OPTIONS else 0)
-                    warp_txt = st.text_input("Warp Specs", value=sample.get("Warp", ""))
-                    w_slub_txt = st.text_input("Warp Slub", value=sample.get("Warp Slub", ""))
-                
-                with col3:
-                    weft_txt = st.text_input("Weft Specs", value=sample.get("Weft", ""))
-                    shade_txt = st.text_input("Shade Type", value=sample.get("Shade", ""))
-                    
+                    # Date values parsing safely
                     req_val = sample.get("Request Date")
                     del_val = sample.get("Delivery date")
                     
-                    try:
-                        if req_val and str(req_val).lower() not in ["nat", "nan", ""]:
-                            req_default = pd.to_datetime(req_val).date()
-                        else:
-                            req_default = date.today()
-                    except:
-                        req_default = date.today()
-                        
-                    try:
-                        if del_val and str(del_val).lower() not in ["nat", "nan", ""]:
-                            del_default = pd.to_datetime(del_val).date()
-                        else:
-                            del_default = date.today()
-                    except:
-                        del_default = date.today()
+                    try: req_default = pd.to_datetime(req_val).date() if req_val and str(req_val).lower() not in ["nat", "nan", ""] else date.today()
+                    except: req_default = date.today()
+                    try: del_default = pd.to_datetime(del_val).date() if del_val and str(del_val).lower() not in ["nat", "nan", ""] else date.today()
+                    except: del_default = date.today()
                     
-                    req_date = st.date_input("Request Date", value=req_default)
+                    req_date = st.date_input("Request Date (Entry)", value=req_default)
                     del_date = st.date_input("Delivery Date Target", value=del_default)
-                    picks_txt = st.text_input("Picks (PPI)", value=sample.get("Picks", ""))
-                    remarks = st.text_area("Remarks / Factory Instructions", value=sample.get("Remarks", ""))
-                
-                if st.form_submit_button("💾 Save Data Updates To Database File", use_container_width=True):
-                    mask = df_master["S.no"].astype(str) == selected_sno
-                    df_master.loc[mask, "Brand"] = brand
-                    df_master.loc[mask, "Ref"] = ref
-                    df_master.loc[mask, "Finish"] = finish
-                    df_master.loc[mask, "TR Code"] = tr_code
-                    df_master.loc[mask, "Source"] = source
-                    df_master.loc[mask, "Category"] = category
-                    df_master.loc[mask, "Status"] = status
-                    df_master.loc[mask, "Warp"] = warp_txt
-                    df_master.loc[mask, "Warp Slub"] = w_slub_txt
-                    df_master.loc[mask, "Weft"] = weft_txt
-                    df_master.loc[mask, "Shade"] = shade_txt
-                    df_master.loc[mask, "Picks"] = picks_txt
-                    df_master.loc[mask, "Request Date"] = str(req_date)
-                    df_master.loc[mask, "Delivery date"] = str(del_date)
-                    df_master.loc[mask, "Remarks"] = remarks
                     
+                    ready_date = st.text_input("Ready Date (Mill Production Out)", value=sample.get("Ready date", ""))
+                    current_date_str = st.text_input("Current Tracking Date", value=sample.get("Current Date", ""))
+
+                with col3:
+                    st.markdown("##### 🧵 Section 3: Yarn Technical Specs")
+                    warp_txt = st.text_input("Warp Specs (Count)", value=sample.get("Warp", ""))
+                    w_slub_txt = st.text_input("Warp Slub Info", value=sample.get("Warp Slub", ""))
+                    weft_txt = st.text_input("Weft Specs (Count)", value=sample.get("Weft", ""))
+                    shade_txt = st.text_input("Shade Type / Indigo Tone", value=sample.get("Shade", ""))
+                    pending_days = st.text_input("Pending Days in Process", value=sample.get("Pending Days in Process", "0"))
+                    alert_state = st.text_input("Alert Status Notification", value=sample.get("Alert", "Normal"))
+
+                with col4:
+                    st.markdown("##### 📐 Section 4: Fabric Structure")
+                    weave_txt = st.text_input("Weave Pattern (e.g. 3/1 RHT)", value=sample.get("Weave", ""))
+                    reed_txt = st.text_input("Reed", value=sample.get("Reed", ""))
+                    picks_txt = st.text_input("Picks (PPI)", value=sample.get("Picks", ""))
+                    greige_mtrs = st.text_input("Greige Meters", value=sample.get("Greige Meters", ""))
+                
+                st.markdown("---")
+                remarks = st.text_area("Remarks / Mill Production Instructions:", value=sample.get("Remarks", ""))
+                
+                if st.form_submit_button("💾 Save All 23 Parameter Updates To Excel Database", use_container_width=True):
+                    # Delete old instance tracking row to avoid duplications
+                    df_master = df_master[df_master["S.no"].astype(str) != selected_sno].copy()
+                    
+                    # Generate fresh dictionary holding exact 23 fields structure mapping
+                    updated_row = {
+                        "S.no": str(new_sno).split('.')[0].strip(),
+                        "Brand": str(brand).strip(),
+                        "Ref": str(ref).strip(),
+                        "Finish": str(finish).strip(),
+                        "TR Code": str(tr_code).strip(),
+                        "Source": str(source).strip(),
+                        "Pending Days in Process": str(pending_days).strip(),
+                        "Request Date": str(req_date),
+                        "Current Date": str(current_date_str).strip(),
+                        "Delivery date": str(del_date),
+                        "Ready date": str(ready_date).strip(),
+                        "Status": str(status).strip(),
+                        "Alert": str(alert_state).strip(),
+                        "Warp": str(warp_txt).strip(),
+                        "Warp Slub": str(w_slub_txt).strip(),
+                        "Weft": str(weft_txt).strip(),
+                        "Shade": str(shade_txt).strip(),
+                        "Weave": str(weave_txt).strip(),
+                        "Reed": str(reed_txt).strip(),
+                        "Picks": str(picks_txt).strip(),
+                        "Greige Meters": str(greige_mtrs).strip(),
+                        "Remarks": str(remarks).strip(),
+                        "Category": str(category).strip()
+                    }
+                    
+                    df_master = pd.concat([df_master, pd.DataFrame([updated_row])], ignore_index=True)
                     df_master = calculate_metrics_and_alerts(df_master)
                     save_all_sheets(df_master)
-                    st.success("🎉 Sample changes applied successfully!")
+                    st.success(f"🎉 All 23 specifications for Sample S.no {new_sno} updated successfully!")
                     st.rerun()
 else:
     st.info("Floor par koi active running target sample nahi mila.")
@@ -277,7 +291,7 @@ else:
 st.markdown("---")
 
 # ====================== DATA EDITORS & TABS ======================
-view = st.radio("🗂️ Select View Pipeline Section:", ["Overall Active View", "Development Section (Category)", "Repeat Run Section (Category)"], horizontal=True)
+view = st.radio("🗂 *Select View Pipeline Section:*", ["Overall Active View", "Development Section (Category)", "Repeat Run Section (Category)"], horizontal=True)
 
 if view == "Overall Active View":
     st.subheader("📋 All Active R&D Samples Pool")
