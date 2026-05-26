@@ -13,7 +13,7 @@ if "fresh_uploaded" not in st.session_state:
 if "current_view" not in st.session_state:
     st.session_state.current_view = "Overall"
 
-# ====================== HELPERS ======================
+# ====================== HELPER FUNCTIONS ======================
 def read_excel_as_string(file):
     return pd.read_excel(file, dtype=str)
 
@@ -88,7 +88,6 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
         imported_df = read_excel_as_string(uploaded_file)
         imported_df = clean_dataframe(imported_df)
 
-        # Marketing → Ref conversion
         if "Marketing" in imported_df.columns:
             imported_df.rename(columns={"Marketing": "Ref"}, inplace=True)
 
@@ -96,37 +95,26 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
             st.error("Ref ya Marketing column nahi mila")
             st.stop()
 
-        # Ppi → Picks
         if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
             imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
 
-        # Add missing columns
-        for col in ["S.no", "Brand", "Ref", "Finish", "TR Code", "Source", "Request Date", 
-                   "Delivery date", "Status", "Warp", "Weft", "Shade", "Weave", "Picks", "Remarks"]:
+        for col in df_master.columns:
             if col not in imported_df.columns:
                 imported_df[col] = ""
 
-        final_df = imported_df.copy()
+        final_df = imported_df[df_master.columns].copy()
         final_df = calculate_metrics_and_alerts(final_df)
 
         if upload_type == "Full Pipeline File":
             save_all_sheets(final_df)
             st.success(f"Full Pipeline Loaded: {len(final_df)} samples")
         else:
-            # === REPEAT FILE - Ab koi strict condition nahi ===
-            st.info(f"Total rows received: {len(final_df)}")
-            
-            # Remove old entries with same S.no
-            if "S.no" in final_df.columns:
-                existing_snos = final_df["S.no"].astype(str).str.strip().tolist()
-                df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
-            
-            # Add all rows from Repeat file
+            existing_snos = final_df["S.no"].astype(str).str.strip().tolist()
+            df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
             df_master = pd.concat([df_master, final_df], ignore_index=True)
             df_master = calculate_metrics_and_alerts(df_master)
             save_all_sheets(df_master)
-            
-            st.success(f"✅ Repeat Sampling Sheet Loaded Successfully: {len(final_df)} samples")
+            st.success(f"✅ Repeat Sheet Loaded: {len(final_df)} samples")
         
         st.rerun()
 
@@ -135,22 +123,63 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
 
 st.markdown("---")
 
-# ====================== DISPLAY DATA ======================
+# ====================== FILTERS ======================
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy() if len(df_master) > 0 else pd.DataFrame()
 df_dev = df_running[df_running["Source"].str.contains("scratch", case=False, na=False)].copy() if len(df_running) > 0 else pd.DataFrame()
 df_repeat = df_running[~df_running["Source"].str.contains("scratch", case=False, na=False)].copy() if len(df_running) > 0 else pd.DataFrame()
 
-st.markdown("### 📊 Live Counters")
+# KPI
 c1, c2, c3 = st.columns(3)
 with c1: st.metric("Total On Floor", len(df_running))
 with c2: st.metric("Development", len(df_dev))
 with c3: st.metric("Repeat", len(df_repeat))
 
-st.subheader("🔄 Repeat Section")
-if len(df_repeat) > 0:
-    st.dataframe(df_repeat, use_container_width=True)
-else:
-    st.info("Repeat section mein abhi koi data nahi hai.")
+st.markdown("---")
 
-st.subheader("📋 Full Data (Debug View)")
-st.dataframe(df_master.head(30), use_container_width=True)
+# ====================== VIEWS WITH DELETE OPTION ======================
+st.markdown(f"### Current View: **{st.session_state.current_view}**")
+
+view = st.radio("Section", ["Overall", "Development", "Repeat"], horizontal=True, key="view_selector")
+st.session_state.current_view = view
+
+if st.session_state.current_view == "Overall":
+    st.subheader("📋 All Active Samples (Delete rows easily)")
+    if len(df_running) > 0:
+        edited_df = st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall_editor")
+        if len(edited_df) < len(df_running):
+            remaining_snos = edited_df["S.no"].astype(str).str.strip().tolist()
+            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining_snos) | 
+                                (df_master["Status"] == "Submitted to marketing")]
+            save_all_sheets(df_master)
+            st.success("Selected rows deleted!")
+            st.rerun()
+
+elif st.session_state.current_view == "Development":
+    st.subheader("🧪 Development Section")
+    if len(df_dev) > 0:
+        edited_df = st.data_editor(df_dev, use_container_width=True, num_rows="dynamic", key="dev_editor")
+        if len(edited_df) < len(df_dev):
+            remaining_snos = edited_df["S.no"].astype(str).str.strip().tolist()
+            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining_snos) | 
+                                (df_master["Status"] == "Submitted to marketing")]
+            save_all_sheets(df_master)
+            st.success("Selected rows deleted!")
+            st.rerun()
+
+elif st.session_state.current_view == "Repeat":
+    st.subheader("🔄 Repeat Section")
+    if len(df_repeat) > 0:
+        edited_df = st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat_editor")
+        if len(edited_df) < len(df_repeat):
+            remaining_snos = edited_df["S.no"].astype(str).str.strip().tolist()
+            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining_snos) | 
+                                (df_master["Status"] == "Submitted to marketing")]
+            save_all_sheets(df_master)
+            st.success("Selected rows deleted!")
+            st.rerun()
+
+# Archive
+st.subheader("📁 Submitted to Marketing (Archive)")
+st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
+
+st.caption("**Kaise Delete Karein:** Data Editor mein left side checkbox tick karein aur keyboard se **Delete** key dabayein.")
