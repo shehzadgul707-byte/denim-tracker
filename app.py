@@ -66,78 +66,68 @@ def load_data():
             df = pd.read_excel(EXCEL_FILE, sheet_name="Master_Data", dtype=str)
             df = clean_dataframe(df)
         except:
-            df = pd.DataFrame(columns=["S.no", "Brand", "Ref", "Finish", "TR Code", "Source", "Pending Days in Process",
-                                       "Request Date", "Current Date", "Delivery date", "Ready date", "Status", "Alert",
-                                       "Warp", "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Picks", "Greige Meters", "Remarks"])
+            df = pd.DataFrame()
     else:
-        df = pd.DataFrame(columns=["S.no", "Brand", "Ref", "Finish", "TR Code", "Source", "Pending Days in Process",
-                                   "Request Date", "Current Date", "Delivery date", "Ready date", "Status", "Alert",
-                                   "Warp", "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Picks", "Greige Meters", "Remarks"])
+        df = pd.DataFrame()
     return df
 
 df_master = load_data()
 
-# ====================== UPLOAD ======================
+# ====================== UI ======================
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
 upload_type = st.radio("Upload Type", 
-    ["Full Pipeline File (Development + Repeat)", "Only Repeat Sampling Sheet"], 
+    ["Full Pipeline File", "Only Repeat Sampling Sheet"], 
     horizontal=True)
 
-uploaded_file = st.file_uploader("Excel File", type=["xlsx"])
+uploaded_file = st.file_uploader("Excel File Select Karein", type=["xlsx"])
 
-if uploaded_file and st.button("🚀 Upload & Process", type="primary"):
+if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_container_width=True):
     try:
         imported_df = read_excel_as_string(uploaded_file)
         imported_df = clean_dataframe(imported_df)
 
-        # Repeat File Special Handling
-        if upload_type == "Only Repeat Sampling Sheet":
-            if "Marketing" in imported_df.columns:
-                imported_df.rename(columns={"Marketing": "Ref"}, inplace=True)
-                st.success("Marketing → Ref convert ho gaya")
+        # Marketing → Ref conversion
+        if "Marketing" in imported_df.columns:
+            imported_df.rename(columns={"Marketing": "Ref"}, inplace=True)
 
         if "Ref" not in imported_df.columns:
             st.error("Ref ya Marketing column nahi mila")
             st.stop()
 
+        # Ppi → Picks
         if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
             imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
 
         # Add missing columns
-        for col in df_master.columns:
+        for col in ["S.no", "Brand", "Ref", "Finish", "TR Code", "Source", "Request Date", 
+                   "Delivery date", "Status", "Warp", "Weft", "Shade", "Weave", "Picks", "Remarks"]:
             if col not in imported_df.columns:
                 imported_df[col] = ""
 
-        final_df = imported_df[df_master.columns].copy()
+        final_df = imported_df.copy()
         final_df = calculate_metrics_and_alerts(final_df)
 
-        if upload_type == "Full Pipeline File (Development + Repeat)":
+        if upload_type == "Full Pipeline File":
             save_all_sheets(final_df)
-            st.success(f"Full Pipeline Loaded: {len(final_df)} rows")
+            st.success(f"Full Pipeline Loaded: {len(final_df)} samples")
         else:
-            # === REPEAT FILE LOGIC ===
-            # Source ko flexible banao
-            final_df["Source"] = final_df["Source"].str.lower()
+            # === REPEAT FILE - Ab koi strict condition nahi ===
+            st.info(f"Total rows received: {len(final_df)}")
             
-            repeat_samples = final_df[final_df["Source"].str.contains("existing|production|repeat", na=False)].copy()
+            # Remove old entries with same S.no
+            if "S.no" in final_df.columns:
+                existing_snos = final_df["S.no"].astype(str).str.strip().tolist()
+                df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
             
-            st.write("**Debug:** Repeat samples found =", len(repeat_samples))   # ← Yeh line debug ke liye
-
-            if len(repeat_samples) > 0:
-                # Remove old entries
-                old_snos = repeat_samples["S.no"].astype(str).str.strip().tolist()
-                df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(old_snos)]
-                
-                # Add new
-                df_master = pd.concat([df_master, repeat_samples], ignore_index=True)
-                df_master = calculate_metrics_and_alerts(df_master)
-                save_all_sheets(df_master)
-                st.success(f"✅ {len(repeat_samples)} Repeat samples successfully added!")
-            else:
-                st.error("Koi Repeat sample nahi mila. Source column mein 'Existing' ya 'Production' hona chahiye.")
-
+            # Add all rows from Repeat file
+            df_master = pd.concat([df_master, final_df], ignore_index=True)
+            df_master = calculate_metrics_and_alerts(df_master)
+            save_all_sheets(df_master)
+            
+            st.success(f"✅ Repeat Sampling Sheet Loaded Successfully: {len(final_df)} samples")
+        
         st.rerun()
 
     except Exception as e:
@@ -145,10 +135,10 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary"):
 
 st.markdown("---")
 
-# ====================== DISPLAY ======================
-df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy()
-df_dev = df_running[df_running["Source"].str.contains("scratch", case=False, na=False)].copy()
-df_repeat = df_running[df_running["Source"].str.contains("existing|production", case=False, na=False)].copy()
+# ====================== DISPLAY DATA ======================
+df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy() if len(df_master) > 0 else pd.DataFrame()
+df_dev = df_running[df_running["Source"].str.contains("scratch", case=False, na=False)].copy() if len(df_running) > 0 else pd.DataFrame()
+df_repeat = df_running[~df_running["Source"].str.contains("scratch", case=False, na=False)].copy() if len(df_running) > 0 else pd.DataFrame()
 
 st.markdown("### 📊 Live Counters")
 c1, c2, c3 = st.columns(3)
@@ -156,12 +146,11 @@ with c1: st.metric("Total On Floor", len(df_running))
 with c2: st.metric("Development", len(df_dev))
 with c3: st.metric("Repeat", len(df_repeat))
 
-# Show Repeat Section Directly for Debugging
-st.subheader("🔄 Repeat Section (Current Data)")
+st.subheader("🔄 Repeat Section")
 if len(df_repeat) > 0:
     st.dataframe(df_repeat, use_container_width=True)
 else:
     st.info("Repeat section mein abhi koi data nahi hai.")
 
-st.subheader("📁 Full Master Data (Debug)")
-st.dataframe(df_master.head(20), use_container_width=True)
+st.subheader("📋 Full Data (Debug View)")
+st.dataframe(df_master.head(30), use_container_width=True)
