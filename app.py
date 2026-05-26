@@ -112,7 +112,7 @@ with k3:
 
 st.markdown("---")
 
-# ====================== UPLOAD SECTION (New Feature) ======================
+# ====================== UPLOAD SECTION ======================
 st.markdown("## 📥 Excel Upload Center")
 
 upload_type = st.radio(
@@ -129,52 +129,66 @@ if uploaded_file is not None:
             imported_df = read_excel_as_string(uploaded_file)
             imported_df = clean_dataframe(imported_df)
             
-            if "Ref" not in imported_df.columns:
+            # ====================== REPEAT FILE SPECIAL HANDLING ======================
+            if upload_type == "Only Repeat Sampling Sheet":
+                # Agar "Ref" nahi hai lekin "Marketing" hai to rename kar do
+                if "Ref" not in imported_df.columns and "Marketing" in imported_df.columns:
+                    imported_df.rename(columns={"Marketing": "Ref"}, inplace=True)
+                    st.info("Marketing column ko Ref mein convert kar diya gaya")
+                
+                # Agar ab bhi Ref nahi hai to error
+                if "Ref" not in imported_df.columns:
+                    st.error("Is Repeat file mein 'Ref' ya 'Marketing' column nahi mila")
+                    st.stop()
+            
+            # Normal check for Full Pipeline
+            elif "Ref" not in imported_df.columns:
                 st.error("Ref column zaroori hai")
-            else:
-                if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
-                    imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
-                
-                valid_df = imported_df[imported_df["Ref"].str.strip() != ""].copy()
-                
-                for col in COLUMNS_STRUCTURE:
-                    if col not in valid_df.columns:
-                        valid_df[col] = ""
-                
-                final_df = valid_df[COLUMNS_STRUCTURE].copy()
-                final_df = calculate_metrics_and_alerts(final_df)
+                st.stop()
+            
+            # Rename Ppi to Picks if exists
+            if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
+                imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
+            
+            valid_df = imported_df[imported_df["Ref"].str.strip() != ""].copy()
+            
+            for col in COLUMNS_STRUCTURE:
+                if col not in valid_df.columns:
+                    valid_df[col] = ""
+            
+            final_df = valid_df[COLUMNS_STRUCTURE].copy()
+            final_df = calculate_metrics_and_alerts(final_df)
 
-                if upload_type == "Full Pipeline File (Development + Repeat)":
-                    # Full Replace
-                    save_all_sheets(final_df)
-                    st.success(f"🎉 Full Pipeline - {len(final_df)} samples loaded!")
+            # ====================== SAVE LOGIC ======================
+            if upload_type == "Full Pipeline File (Development + Repeat)":
+                save_all_sheets(final_df)
+                st.success(f"🎉 Full Pipeline - {len(final_df)} samples loaded!")
+            
+            else:  # Only Repeat Sampling Sheet
+                repeat_mask = final_df["Source"].str.contains("existing|production", case=False, na=False)
+                repeat_samples = final_df[repeat_mask].copy()
                 
-                else:  # Only Repeat Sampling Sheet
-                    # Append / Update Repeat samples
-                    repeat_mask = final_df["Source"].str.contains("existing|production", case=False, na=False)
-                    repeat_samples = final_df[repeat_mask].copy()
+                if len(repeat_samples) > 0:
+                    # Remove old samples with same S.no
+                    existing_snos = repeat_samples["S.no"].astype(str).str.strip().tolist()
+                    df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
                     
-                    if len(repeat_samples) > 0:
-                        # Remove old repeat samples with same S.no
-                        existing_snos = repeat_samples["S.no"].astype(str).str.strip().tolist()
-                        df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
-                        
-                        # Add new repeat samples
-                        df_master = pd.concat([df_master, repeat_samples], ignore_index=True)
-                        df_master = calculate_metrics_and_alerts(df_master)
-                        save_all_sheets(df_master)
-                        st.success(f"✅ Only Repeat Sheet - {len(repeat_samples)} samples added/updated!")
-                    else:
-                        st.warning("Is file mein koi Repeat sample nahi mila.")
+                    # Add new repeat samples
+                    df_master = pd.concat([df_master, repeat_samples], ignore_index=True)
+                    df_master = calculate_metrics_and_alerts(df_master)
+                    save_all_sheets(df_master)
+                    st.success(f"✅ Repeat Sheet - {len(repeat_samples)} samples added/updated!")
+                else:
+                    st.warning("Is file mein koi Repeat sample nahi mila.")
 
-                st.rerun()
-                
+            st.rerun()
+            
         except Exception as e:
             st.error(f"Error: {str(e)}")
 
 st.markdown("---")
 
-# Dynamic View (Same as before)
+# ====================== VIEWS ======================
 st.markdown(f"### Current View: **{st.session_state.current_view}**")
 
 if st.session_state.current_view == "Overall":
