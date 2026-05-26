@@ -64,17 +64,22 @@ def load_data():
         try:
             df = pd.read_excel(EXCEL_FILE, sheet_name="Master_Data", dtype=str)
             df = clean_dataframe(df)
-            # Agar Category column nahi hai to add kar do
             if "Category" not in df.columns:
                 df["Category"] = ""
             return df
         except:
-            df = pd.DataFrame()
-            df["Category"] = ""
+            df = pd.DataFrame(columns=["S.no", "Brand", "Ref", "Finish", "TR Code", "Source", 
+                                       "Pending Days in Process", "Request Date", "Current Date", 
+                                       "Delivery date", "Ready date", "Status", "Alert", "Warp", 
+                                       "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Picks", 
+                                       "Greige Meters", "Remarks", "Category"])
             return df
     else:
-        df = pd.DataFrame()
-        df["Category"] = ""
+        df = pd.DataFrame(columns=["S.no", "Brand", "Ref", "Finish", "TR Code", "Source", 
+                                   "Pending Days in Process", "Request Date", "Current Date", 
+                                   "Delivery date", "Ready date", "Status", "Alert", "Warp", 
+                                   "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Picks", 
+                                   "Greige Meters", "Remarks", "Category"])
         return df
 
 df_master = load_data()
@@ -103,25 +108,42 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
         if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
             imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
 
-        # Add missing columns including Category
-        for col in list(df_master.columns) + ["Category"]:
+        # Add missing columns
+        for col in df_master.columns:
             if col not in imported_df.columns:
                 imported_df[col] = ""
 
-        final_df = imported_df[df_master.columns].copy() if len(df_master) > 0 else imported_df
+        final_df = imported_df[df_master.columns].copy()
         final_df = calculate_metrics_and_alerts(final_df)
 
         if upload_type == "Full Pipeline File":
             save_all_sheets(final_df)
-            st.success(f"Full Pipeline Loaded: {len(final_df)} samples")
-        else:
-            existing_snos = final_df["S.no"].astype(str).str.strip().tolist()
-            df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
-            df_master = pd.concat([df_master, final_df], ignore_index=True)
-            df_master = calculate_metrics_and_alerts(df_master)
-            save_all_sheets(df_master)
-            st.success(f"✅ Repeat Sheet Loaded: {len(final_df)} samples")
+            st.success(f"✅ Full Pipeline Loaded: {len(final_df)} samples")
         
+        else:  # === ONLY REPEAT SAMPLING SHEET ===
+            # Category column ko strong handle karo
+            if "Category" in final_df.columns:
+                final_df["Category"] = final_df["Category"].str.strip()
+            else:
+                final_df["Category"] = "Repeat"
+
+            # Sirf Repeat category wale samples ko process karo
+            repeat_new = final_df[final_df["Category"].str.contains("repeat", case=False, na=False)].copy()
+            
+            if len(repeat_new) > 0:
+                # Purane same S.no wale samples ko hatao (sirf repeat wale)
+                existing_snos = repeat_new["S.no"].astype(str).str.strip().tolist()
+                df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
+                
+                # Naye repeat samples add karo
+                df_master = pd.concat([df_master, repeat_new], ignore_index=True)
+                df_master = calculate_metrics_and_alerts(df_master)
+                save_all_sheets(df_master)
+                
+                st.success(f"✅ Only Repeat Sheet Loaded: {len(repeat_new)} samples (Development safe rahe)")
+            else:
+                st.warning("Is file mein koi 'Repeat' category nahi mila.")
+
         st.rerun()
 
     except Exception as e:
@@ -129,30 +151,21 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
 
 st.markdown("---")
 
-# ====================== CLASSIFICATION ======================
+# ====================== DISPLAY ======================
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy() if len(df_master) > 0 else pd.DataFrame()
 
-# Safe Category Check
-if "Category" in df_running.columns:
-    df_dev = df_running[df_running["Category"].str.contains("development", case=False, na=False)].copy()
-    df_repeat = df_running[df_running["Category"].str.contains("repeat", case=False, na=False)].copy()
-else:
-    df_dev = pd.DataFrame()
-    df_repeat = df_running.copy()
+df_dev = df_running[df_running.get("Category", "").str.contains("development", case=False, na=False)].copy()
+df_repeat = df_running[df_running.get("Category", "").str.contains("repeat", case=False, na=False)].copy()
 
-# KPI
 c1, c2, c3 = st.columns(3)
 with c1: st.metric("Total On Floor", len(df_running))
 with c2: st.metric("Development", len(df_dev))
 with c3: st.metric("Repeat", len(df_repeat))
 
-st.info("**Classification:** 'Category' column ke basis par (Development / Repeat)")
-
-# Views with Delete Option
 view = st.radio("Section", ["Overall", "Development", "Repeat"], horizontal=True, key="view_selector")
 
 if view == "Overall":
-    st.subheader("📋 All Active Samples")
+    st.subheader("All Active Samples")
     if len(df_running) > 0:
         edited = st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall")
         if len(edited) < len(df_running):
@@ -172,6 +185,5 @@ elif view == "Repeat":
     if len(df_repeat) > 0:
         st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat")
 
-# Archive
-st.subheader("📁 Archive (Submitted to Marketing)")
+st.subheader("📁 Archive")
 st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
