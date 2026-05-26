@@ -8,6 +8,8 @@ st.set_page_config(page_title="Denim R&D Advanced Tracker", layout="wide")
 
 EXCEL_FILE = "Denim_Master_Database.xlsx"
 
+STATUS_OPTIONS = ["Yarn Demand", "Dyeing", "Weaving", "Finishing", "Inspection", "Submitted to marketing"]
+
 if "fresh_uploaded" not in st.session_state:
     st.session_state.fresh_uploaded = False
 
@@ -88,7 +90,7 @@ def load_data():
 
 df_master = load_data()
 
-# ====================== UPLOAD SECTION ======================
+# ====================== UPLOAD ======================
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
@@ -98,7 +100,6 @@ upload_type = st.radio("Upload Type",
 uploaded_file = st.file_uploader("Excel File Select Karein", type=["xlsx"])
 
 if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_container_width=True):
-    # ... (upload logic same as before - omitted for brevity, you can keep previous upload code)
     try:
         imported_df = read_excel_as_string(uploaded_file)
         imported_df = clean_dataframe(imported_df)
@@ -173,56 +174,63 @@ st.markdown("---")
 
 # ====================== EDIT SAMPLE FEATURE ======================
 st.subheader("✏️ Edit Any Sample")
+
 all_active = df_running.copy()
 if len(all_active) > 0:
-    all_active["Display"] = all_active["S.no"].astype(str) + " - " + all_active["Ref"].astype(str)
-    selected_display = st.selectbox("Select Sample to Edit", options=all_active["Display"].tolist(), index=0)
+    all_active["Display"] = all_active["S.no"].astype(str) + " - " + all_active["Ref"].astype(str) + " (" + all_active["Brand"].astype(str) + ")"
+    
+    selected_display = st.selectbox("Select Sample to Edit", options=all_active["Display"].tolist())
     
     if selected_display:
         selected_sno = selected_display.split(" - ")[0].strip()
-        sample = df_master[df_master["S.no"].astype(str) == selected_sno].iloc[0]
+        sample_row = df_master[df_master["S.no"].astype(str) == selected_sno]
         
-        with st.form("edit_sample_form"):
-            st.write(f"**Editing Sample: S.no {selected_sno}**")
-            col_a, col_b, col_c = st.columns(3)
+        if not sample_row.empty:
+            sample = sample_row.iloc[0]
             
-            with col_a:
-                brand = st.text_input("Brand", value=sample.get("Brand", ""))
-                ref = st.text_input("Ref", value=sample.get("Ref", ""))
-                finish = st.text_input("Finish", value=sample.get("Finish", ""))
-                tr_code = st.text_input("TR Code", value=sample.get("TR Code", ""))
-            
-            with col_b:
-                source = st.selectbox("Source", ["Existing", "Scratch", "Production beam"], 
-                                    index=["Existing", "Scratch", "Production beam"].index(sample.get("Source", "Scratch")) if sample.get("Source") in ["Existing", "Scratch", "Production beam"] else 1)
-                category = st.selectbox("Category", ["Development", "Repeat"], 
-                                      index=0 if sample.get("Category", "Development") == "Development" else 1)
-                status = st.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(sample.get("Status", "Yarn Demand")) if sample.get("Status") in STATUS_OPTIONS else 0)
-            
-            with col_c:
-                request_date = st.date_input("Request Date", value=pd.to_datetime(sample.get("Request Date")).date() if pd.notna(sample.get("Request Date")) else date.today())
-                delivery_date = st.date_input("Delivery Date", value=pd.to_datetime(sample.get("Delivery date")).date() if pd.notna(sample.get("Delivery date")) else date.today())
-                remarks = st.text_area("Remarks", value=sample.get("Remarks", ""))
-            
-            if st.form_submit_button("💾 Save Changes"):
-                mask = df_master["S.no"].astype(str) == selected_sno
-                df_master.loc[mask, "Brand"] = brand
-                df_master.loc[mask, "Ref"] = ref
-                df_master.loc[mask, "Finish"] = finish
-                df_master.loc[mask, "TR Code"] = tr_code
-                df_master.loc[mask, "Source"] = source
-                df_master.loc[mask, "Category"] = category
-                df_master.loc[mask, "Status"] = status
-                df_master.loc[mask, "Request Date"] = str(request_date)
-                df_master.loc[mask, "Delivery date"] = str(delivery_date)
-                df_master.loc[mask, "Remarks"] = remarks
+            with st.form("edit_sample_form", clear_on_submit=False):
+                st.write(f"**Editing: S.no {selected_sno} | {sample.get('Ref', '')}**")
                 
-                df_master = calculate_metrics_and_alerts(df_master)
-                save_all_sheets(df_master)
-                st.success("Sample successfully updated!")
-                st.rerun()
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    brand = st.text_input("Brand", value=sample.get("Brand", ""))
+                    ref = st.text_input("Ref", value=sample.get("Ref", ""))
+                    finish = st.text_input("Finish", value=sample.get("Finish", ""))
+                    tr_code = st.text_input("TR Code", value=sample.get("TR Code", ""))
+                
+                with col2:
+                    source = st.selectbox("Source", ["Existing", "Scratch", "Production beam"], 
+                                        index=0)
+                    category = st.selectbox("Category", ["Development", "Repeat"], 
+                                          index=0 if str(sample.get("Category", "")).lower() == "development" else 1)
+                    status = st.selectbox("Status", STATUS_OPTIONS, 
+                                        index=STATUS_OPTIONS.index(sample.get("Status", "Yarn Demand")) 
+                                        if sample.get("Status") in STATUS_OPTIONS else 0)
+                
+                with col3:
+                    req_date = st.date_input("Request Date", 
+                                           value=pd.to_datetime(sample.get("Request Date")).date() 
+                                           if pd.notna(sample.get("Request Date")) else date.today())
+                    del_date = st.date_input("Delivery Date", 
+                                           value=pd.to_datetime(sample.get("Delivery date")).date() 
+                                           if pd.notna(sample.get("Delivery date")) else date.today())
+                    remarks = st.text_area("Remarks", value=sample.get("Remarks", ""))
+                
+                submitted = st.form_submit_button("💾 Save Changes", use_container_width=True)
+                
+                if submitted:
+                    mask = df_master["S.no"].astype(str) == selected_sno
+                    df_master.loc[mask, ["Brand", "Ref", "Finish", "TR Code", "Source", 
+                                       "Category", "Status", "Request Date", "Delivery date", "Remarks"]] = [
+                        brand, ref, finish, tr_code, source, category, status, str(req_date), str(del_date), remarks
+                    ]
+                    df_master = calculate_metrics_and_alerts(df_master)
+                    save_all_sheets(df_master)
+                    st.success("✅ Sample Updated Successfully!")
+                    st.rerun()
 else:
-    st.info("No active samples to edit.")
+    st.info("No active samples available to edit.")
 
 # ====================== TABS ======================
 view = st.radio("View Section", ["Overall", "Development", "Repeat"], horizontal=True)
@@ -242,5 +250,5 @@ elif view == "Repeat":
     if len(df_repeat) > 0:
         st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat")
 
-st.subheader("📁 Archive")
+st.subheader("📁 Archive (Submitted to Marketing)")
 st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
