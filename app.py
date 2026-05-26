@@ -68,23 +68,23 @@ def load_data():
                 df["Category"] = ""
             return df
         except:
-            df = pd.DataFrame(columns=["S.no", "Brand", "Ref", "Finish", "TR Code", "Source", 
-                                       "Pending Days in Process", "Request Date", "Current Date", 
-                                       "Delivery date", "Ready date", "Status", "Alert", "Warp", 
-                                       "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Picks", 
-                                       "Greige Meters", "Remarks", "Category"])
+            df = pd.DataFrame(columns=["S.no","Brand","Ref","Finish","TR Code","Source",
+                                       "Pending Days in Process","Request Date","Current Date",
+                                       "Delivery date","Ready date","Status","Alert","Warp",
+                                       "Warp Slub","Weft","Shade","Weave","Reed","Picks",
+                                       "Greige Meters","Remarks","Category"])
             return df
     else:
-        df = pd.DataFrame(columns=["S.no", "Brand", "Ref", "Finish", "TR Code", "Source", 
-                                   "Pending Days in Process", "Request Date", "Current Date", 
-                                   "Delivery date", "Ready date", "Status", "Alert", "Warp", 
-                                   "Warp Slub", "Weft", "Shade", "Weave", "Reed", "Picks", 
-                                   "Greige Meters", "Remarks", "Category"])
+        df = pd.DataFrame(columns=["S.no","Brand","Ref","Finish","TR Code","Source",
+                                   "Pending Days in Process","Request Date","Current Date",
+                                   "Delivery date","Ready date","Status","Alert","Warp",
+                                   "Warp Slub","Weft","Shade","Weave","Reed","Picks",
+                                   "Greige Meters","Remarks","Category"])
         return df
 
 df_master = load_data()
 
-# ====================== UI ======================
+# ====================== UPLOAD ======================
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
@@ -108,7 +108,6 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
         if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
             imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
 
-        # Add missing columns
         for col in df_master.columns:
             if col not in imported_df.columns:
                 imported_df[col] = ""
@@ -118,31 +117,35 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
 
         if upload_type == "Full Pipeline File":
             save_all_sheets(final_df)
-            st.success(f"✅ Full Pipeline Loaded: {len(final_df)} samples")
+            st.success(f"Full Pipeline Loaded: {len(final_df)} samples")
         
-        else:  # === ONLY REPEAT SAMPLING SHEET ===
-            # Category column ko strong handle karo
+        else:  # ================= ONLY REPEAT =================
             if "Category" in final_df.columns:
                 final_df["Category"] = final_df["Category"].str.strip()
             else:
                 final_df["Category"] = "Repeat"
 
-            # Sirf Repeat category wale samples ko process karo
-            repeat_new = final_df[final_df["Category"].str.contains("repeat", case=False, na=False)].copy()
+            # Sirf Repeat category wale samples lo
+            new_repeat = final_df[final_df["Category"].str.contains("repeat", case=False, na=False)].copy()
             
-            if len(repeat_new) > 0:
-                # Purane same S.no wale samples ko hatao (sirf repeat wale)
-                existing_snos = repeat_new["S.no"].astype(str).str.strip().tolist()
-                df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
+            if len(new_repeat) > 0:
+                snos_to_update = new_repeat["S.no"].astype(str).str.strip().tolist()
                 
-                # Naye repeat samples add karo
-                df_master = pd.concat([df_master, repeat_new], ignore_index=True)
+                # **Important Fix**: Sirf woh samples delete karo jo Repeat category ke saath update ho rahe hain
+                # Development wale samples safe rahenge
+                df_master = df_master[~(
+                    df_master["S.no"].astype(str).str.strip().isin(snos_to_update) & 
+                    df_master["Category"].str.contains("repeat", case=False, na=False)
+                )]
+                
+                # Naye Repeat samples add karo
+                df_master = pd.concat([df_master, new_repeat], ignore_index=True)
                 df_master = calculate_metrics_and_alerts(df_master)
                 save_all_sheets(df_master)
                 
-                st.success(f"✅ Only Repeat Sheet Loaded: {len(repeat_new)} samples (Development safe rahe)")
+                st.success(f"✅ {len(new_repeat)} Repeat samples added/updated. Development samples safe hain.")
             else:
-                st.warning("Is file mein koi 'Repeat' category nahi mila.")
+                st.warning("Koi Repeat category sample nahi mila.")
 
         st.rerun()
 
@@ -154,26 +157,20 @@ st.markdown("---")
 # ====================== DISPLAY ======================
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy() if len(df_master) > 0 else pd.DataFrame()
 
-df_dev = df_running[df_running.get("Category", "").str.contains("development", case=False, na=False)].copy()
-df_repeat = df_running[df_running.get("Category", "").str.contains("repeat", case=False, na=False)].copy()
+df_dev = df_running[df_running.get("Category", pd.Series("")).str.contains("development", case=False, na=False)].copy()
+df_repeat = df_running[df_running.get("Category", pd.Series("")).str.contains("repeat", case=False, na=False)].copy()
 
 c1, c2, c3 = st.columns(3)
 with c1: st.metric("Total On Floor", len(df_running))
 with c2: st.metric("Development", len(df_dev))
 with c3: st.metric("Repeat", len(df_repeat))
 
-view = st.radio("Section", ["Overall", "Development", "Repeat"], horizontal=True, key="view_selector")
+view = st.radio("Section", ["Overall", "Development", "Repeat"], horizontal=True)
 
 if view == "Overall":
     st.subheader("All Active Samples")
     if len(df_running) > 0:
-        edited = st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall")
-        if len(edited) < len(df_running):
-            remaining = edited["S.no"].astype(str).str.strip().tolist()
-            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining) | 
-                                (df_master["Status"] == "Submitted to marketing")]
-            save_all_sheets(df_master)
-            st.rerun()
+        st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall")
 
 elif view == "Development":
     st.subheader("🧪 Development Section")
