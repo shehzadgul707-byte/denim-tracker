@@ -34,14 +34,7 @@ def clean_dataframe(df):
 
 def save_all_sheets(df_master):
     df_master = clean_dataframe(df_master)
-    # Automatically calculate Category dynamically based on Technical Source before saving
-    for idx in df_master.index:
-        src = str(df_master.at[idx, 'Source']).strip().lower()
-        if src == "scratch":
-            df_master.at[idx, 'Category'] = "Development"
-        else:
-            df_master.at[idx, 'Category'] = "Repeat"
-            
+    # Respect the existing Category data instead of overriding it via Source
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
         df_master.to_excel(writer, sheet_name="Master_Data", index=False)
 
@@ -56,15 +49,8 @@ def calculate_metrics_and_alerts(df):
         # 1. Clear floating points from serial numbers
         sno_raw = str(df.at[idx, 'S.no']).split('.')[0].strip()
         df.at[idx, 'S.no'] = sno_raw
-        
-        # 2. Dynamic Category Routing
-        src = str(df.at[idx, 'Source']).strip().lower()
-        if src == "scratch":
-            df.at[idx, 'Category'] = "Development"
-        else:
-            df.at[idx, 'Category'] = "Repeat"
 
-        # 3. Running Days Calculation
+        # 2. Running Days Calculation
         try:
             req_val = df.at[idx, 'Request Date']
             if req_val and str(req_val).lower() != "nat" and str(req_val).lower() != "nan":
@@ -75,7 +61,7 @@ def calculate_metrics_and_alerts(df):
         except:
             df.at[idx, 'Pending Days in Process'] = "0"
         
-        # 4. Critical Alert System
+        # 3. Critical Alert System
         status = str(df.at[idx, 'Status']).strip()
         if status != "Submitted to marketing":
             try:
@@ -158,8 +144,10 @@ df_master = calculate_metrics_and_alerts(df_master)
 
 # Separate active running samples from complete marketing archive
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy()
-df_dev = df_running[df_running["Category"].str.lower() == "development"].copy()
-df_repeat = df_running[df_running["Category"].str.lower() == "repeat"].copy()
+
+# Strictly filter segments strictly by explicit text values inside 'Category' column
+df_dev = df_running[df_running["Category"].str.lower().str.contains("development", na=False)].copy()
+df_repeat = df_running[df_running["Category"].str.lower().str.contains("repeat", na=False)].copy()
 
 # ====================== DASHBOARD KPI & PLOTLY CHARTS ======================
 st.markdown("### 📊 Live R&D Floor Workload Indicators")
@@ -220,24 +208,23 @@ if len(df_running) > 0:
                     ref = st.text_input("Ref Quality No", value=sample.get("Ref", ""))
                     finish = st.text_input("Finish Type", value=sample.get("Finish", ""))
                     tr_code = st.text_input("TR Code", value=sample.get("TR Code", ""))
-                    
-                    # Safe source matching
-                    src_val = str(sample.get("Source", "Existing")).lower().strip()
-                    src_idx = 1
-                    if src_val == "scratch": src_idx = 0
-                    elif src_val == "production beam": src_idx = 2
-                    source = st.selectbox("Source", ["Scratch", "Existing", "Production beam"], index=src_idx)
+                    source = st.text_input("Source", value=sample.get("Source", ""))
                 
                 with col2:
+                    # Let the user completely change the Category regardless of what Source is entered
+                    cat_val = str(sample.get("Category", "Development")).lower().strip()
+                    cat_idx = 0 if "development" in cat_val else 1
+                    category = st.selectbox("Category Group", ["Development", "Repeat"], index=cat_idx)
+                    
                     status = st.selectbox("Pipeline Status Stage", STATUS_OPTIONS, 
                                           index=STATUS_OPTIONS.index(sample.get("Status")) if sample.get("Status") in STATUS_OPTIONS else 0)
                     warp_txt = st.text_input("Warp Specs", value=sample.get("Warp", ""))
                     w_slub_txt = st.text_input("Warp Slub", value=sample.get("Warp Slub", ""))
-                    weft_txt = st.text_input("Weft Specs", value=sample.get("Weft", ""))
-                    shade_txt = st.text_input("Shade Type", value=sample.get("Shade", ""))
                 
                 with col3:
-                    # Robust dates parsing to block pandas NaT / NaN form crashes
+                    weft_txt = st.text_input("Weft Specs", value=sample.get("Weft", ""))
+                    shade_txt = st.text_input("Shade Type", value=sample.get("Shade", ""))
+                    
                     req_val = sample.get("Request Date")
                     del_val = sample.get("Delivery date")
                     
@@ -269,6 +256,7 @@ if len(df_running) > 0:
                     df_master.loc[mask, "Finish"] = finish
                     df_master.loc[mask, "TR Code"] = tr_code
                     df_master.loc[mask, "Source"] = source
+                    df_master.loc[mask, "Category"] = category
                     df_master.loc[mask, "Status"] = status
                     df_master.loc[mask, "Warp"] = warp_txt
                     df_master.loc[mask, "Warp Slub"] = w_slub_txt
@@ -289,7 +277,7 @@ else:
 st.markdown("---")
 
 # ====================== DATA EDITORS & TABS ======================
-view = st.radio("🗂️ Select View Pipeline Section:", ["Overall Active View", "Development Section (Scratch)", "Repeat Run Section"], horizontal=True)
+view = st.radio("🗂️ Select View Pipeline Section:", ["Overall Active View", "Development Section (Category)", "Repeat Run Section (Category)"], horizontal=True)
 
 if view == "Overall Active View":
     st.subheader("📋 All Active R&D Samples Pool")
@@ -303,29 +291,29 @@ if view == "Overall Active View":
     else:
         st.info("Pipeline Table Empty. Upload an Excel File above to begin tracking.")
 
-elif view == "Development Section (Scratch)":
-    st.subheader("🧪 Pure Development Specs Filter")
+elif view == "Development Section (Category)":
+    st.subheader("🧪 Pure Development Specs Filter (Based strictly on Category)")
     if len(df_dev) > 0:
         edited_dev = st.data_editor(df_dev, use_container_width=True, num_rows="dynamic", key="dev_editor_sync")
         if len(edited_dev) != len(df_dev):
             active_snos = edited_dev["S.no"].tolist()
-            df_master = df_master[(df_master["S.no"].isin(active_snos)) | (df_master["Category"].str.lower() != "development") | (df_master["Status"] == "Submitted to marketing")].copy()
+            df_master = df_master[(df_master["S.no"].isin(active_snos)) | (~df_master["Category"].str.lower().str.contains("development", na=False)) | (df_master["Status"] == "Submitted to marketing")].copy()
             save_all_sheets(df_master)
             st.rerun()
     else:
-        st.info("Development pool khali hai (No Scratch Source matches found).")
+        st.info("Development pool khali hai (No samples found with Category containing 'Development').")
 
-elif view == "Repeat Run Section":
-    st.subheader("🔄 Repeat Processing Run Specs Filter")
+elif view == "Repeat Run Section (Category)":
+    st.subheader("🔄 Repeat Processing Run Specs Filter (Based strictly on Category)")
     if len(df_repeat) > 0:
         edited_repeat = st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat_editor_sync")
         if len(edited_repeat) != len(df_repeat):
             active_snos = edited_repeat["S.no"].tolist()
-            df_master = df_master[(df_master["S.no"].isin(active_snos)) | (df_master["Category"].str.lower() != "repeat") | (df_master["Status"] == "Submitted to marketing")].copy()
+            df_master = df_master[(df_master["S.no"].isin(active_snos)) | (~df_master["Category"].str.lower().str.contains("repeat", na=False)) | (df_master["Status"] == "Submitted to marketing")].copy()
             save_all_sheets(df_master)
             st.rerun()
     else:
-        st.info("Repeat pool khali hai.")
+        st.info("Repeat pool khali hai (No samples found with Category containing 'Repeat').")
 
 # Permanent Floor Archive View
 st.markdown("---")
