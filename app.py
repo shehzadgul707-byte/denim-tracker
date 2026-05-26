@@ -14,6 +14,9 @@ if "fresh_uploaded" not in st.session_state:
 if "current_view" not in st.session_state:
     st.session_state.current_view = "Overall"
 
+if "editing_sno" not in st.session_state:
+    st.session_state.editing_sno = None
+
 # ====================== HELPERS ======================
 def read_excel_as_string(file):
     return pd.read_excel(file, dtype=str)
@@ -85,7 +88,7 @@ def load_data():
 
 df_master = load_data()
 
-# ====================== UPLOAD ======================
+# ====================== UPLOAD SECTION ======================
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
@@ -95,6 +98,7 @@ upload_type = st.radio("Upload Type",
 uploaded_file = st.file_uploader("Excel File Select Karein", type=["xlsx"])
 
 if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_container_width=True):
+    # ... (upload logic same as before - omitted for brevity, you can keep previous upload code)
     try:
         imported_df = read_excel_as_string(uploaded_file)
         imported_df = clean_dataframe(imported_df)
@@ -149,43 +153,79 @@ st.markdown("---")
 
 # ====================== GRAPHS ======================
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy() if len(df_master) > 0 else pd.DataFrame()
-
 df_dev = df_running[df_running.get("Category", pd.Series("")).str.contains("development", case=False, na=False)].copy()
 df_repeat = df_running[df_running.get("Category", pd.Series("")).str.contains("repeat", case=False, na=False)].copy()
 
-# KPI + Graphs
-st.markdown("### 📊 Live Dashboard")
-
 col1, col2, col3 = st.columns([1, 2, 2])
-
 with col1:
     st.metric("**Total On Floor**", len(df_running))
-
 with col2:
-    fig_pie = px.pie(
-        names=['Development', 'Repeat'],
-        values=[len(df_dev), len(df_repeat)],
-        title="Development vs Repeat",
-        color_discrete_sequence=['#0D9488', '#B45309']
-    )
+    fig_pie = px.pie(names=['Development', 'Repeat'], values=[len(df_dev), len(df_repeat)], 
+                     title="Development vs Repeat", color_discrete_sequence=['#0D9488', '#B45309'])
     st.plotly_chart(fig_pie, use_container_width=True)
-
 with col3:
-    fig_bar = px.bar(
-        x=['Development', 'Repeat'],
-        y=[len(df_dev), len(df_repeat)],
-        text=[len(df_dev), len(df_repeat)],
-        title="Development vs Repeat (Bar Chart)",
-        color=['Development', 'Repeat'],
-        color_discrete_sequence=['#0D9488', '#B45309']
-    )
-    fig_bar.update_traces(textposition='auto')
+    fig_bar = px.bar(x=['Development', 'Repeat'], y=[len(df_dev), len(df_repeat)], 
+                     text=[len(df_dev), len(df_repeat)], title="Bar Chart",
+                     color_discrete_sequence=['#0D9488', '#B45309'])
     st.plotly_chart(fig_bar, use_container_width=True)
 
 st.markdown("---")
 
-# Views
-view = st.radio("Section", ["Overall", "Development", "Repeat"], horizontal=True, key="view_selector")
+# ====================== EDIT SAMPLE FEATURE ======================
+st.subheader("✏️ Edit Any Sample")
+all_active = df_running.copy()
+if len(all_active) > 0:
+    all_active["Display"] = all_active["S.no"].astype(str) + " - " + all_active["Ref"].astype(str)
+    selected_display = st.selectbox("Select Sample to Edit", options=all_active["Display"].tolist(), index=0)
+    
+    if selected_display:
+        selected_sno = selected_display.split(" - ")[0].strip()
+        sample = df_master[df_master["S.no"].astype(str) == selected_sno].iloc[0]
+        
+        with st.form("edit_sample_form"):
+            st.write(f"**Editing Sample: S.no {selected_sno}**")
+            col_a, col_b, col_c = st.columns(3)
+            
+            with col_a:
+                brand = st.text_input("Brand", value=sample.get("Brand", ""))
+                ref = st.text_input("Ref", value=sample.get("Ref", ""))
+                finish = st.text_input("Finish", value=sample.get("Finish", ""))
+                tr_code = st.text_input("TR Code", value=sample.get("TR Code", ""))
+            
+            with col_b:
+                source = st.selectbox("Source", ["Existing", "Scratch", "Production beam"], 
+                                    index=["Existing", "Scratch", "Production beam"].index(sample.get("Source", "Scratch")) if sample.get("Source") in ["Existing", "Scratch", "Production beam"] else 1)
+                category = st.selectbox("Category", ["Development", "Repeat"], 
+                                      index=0 if sample.get("Category", "Development") == "Development" else 1)
+                status = st.selectbox("Status", STATUS_OPTIONS, index=STATUS_OPTIONS.index(sample.get("Status", "Yarn Demand")) if sample.get("Status") in STATUS_OPTIONS else 0)
+            
+            with col_c:
+                request_date = st.date_input("Request Date", value=pd.to_datetime(sample.get("Request Date")).date() if pd.notna(sample.get("Request Date")) else date.today())
+                delivery_date = st.date_input("Delivery Date", value=pd.to_datetime(sample.get("Delivery date")).date() if pd.notna(sample.get("Delivery date")) else date.today())
+                remarks = st.text_area("Remarks", value=sample.get("Remarks", ""))
+            
+            if st.form_submit_button("💾 Save Changes"):
+                mask = df_master["S.no"].astype(str) == selected_sno
+                df_master.loc[mask, "Brand"] = brand
+                df_master.loc[mask, "Ref"] = ref
+                df_master.loc[mask, "Finish"] = finish
+                df_master.loc[mask, "TR Code"] = tr_code
+                df_master.loc[mask, "Source"] = source
+                df_master.loc[mask, "Category"] = category
+                df_master.loc[mask, "Status"] = status
+                df_master.loc[mask, "Request Date"] = str(request_date)
+                df_master.loc[mask, "Delivery date"] = str(delivery_date)
+                df_master.loc[mask, "Remarks"] = remarks
+                
+                df_master = calculate_metrics_and_alerts(df_master)
+                save_all_sheets(df_master)
+                st.success("Sample successfully updated!")
+                st.rerun()
+else:
+    st.info("No active samples to edit.")
+
+# ====================== TABS ======================
+view = st.radio("View Section", ["Overall", "Development", "Repeat"], horizontal=True)
 
 if view == "Overall":
     st.subheader("📋 All Active Samples")
@@ -202,5 +242,5 @@ elif view == "Repeat":
     if len(df_repeat) > 0:
         st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat")
 
-st.subheader("📁 Archive (Submitted to Marketing)")
+st.subheader("📁 Archive")
 st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
