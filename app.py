@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import os
+from PIL import Image
+import io
 
 st.set_page_config(page_title="Denim R&D Advanced Tracker", layout="wide")
 
@@ -77,58 +79,82 @@ df_master = load_data()
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
-upload_type = st.radio("Upload Type", 
-    ["Full Pipeline File", "Only Repeat Sampling Sheet"], 
-    horizontal=True)
+# Upload Options
+st.markdown("## 📥 Data Upload Center")
 
-uploaded_file = st.file_uploader("Excel File Select Karein", type=["xlsx"])
+upload_mode = st.radio("Upload Ka Tarika Select Karein:", 
+    ["Excel File", "Image / Screenshot (Picture)"], horizontal=True)
 
-if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_container_width=True):
-    try:
-        imported_df = read_excel_as_string(uploaded_file)
-        imported_df = clean_dataframe(imported_df)
+if upload_mode == "Excel File":
+    upload_type = st.radio("Excel File Type", 
+        ["Full Pipeline File", "Only Repeat Sampling Sheet"], horizontal=True)
+    
+    uploaded_file = st.file_uploader("Excel File Select Karein", type=["xlsx"])
+    
+    if uploaded_file and st.button("🚀 Upload Excel", type="primary"):
+        # ... (previous Excel logic same rakha hai)
+        try:
+            imported_df = read_excel_as_string(uploaded_file)
+            imported_df = clean_dataframe(imported_df)
 
-        if "Marketing" in imported_df.columns:
-            imported_df.rename(columns={"Marketing": "Ref"}, inplace=True)
+            if "Marketing" in imported_df.columns:
+                imported_df.rename(columns={"Marketing": "Ref"}, inplace=True)
 
-        if "Ref" not in imported_df.columns:
-            st.error("Ref ya Marketing column nahi mila")
-            st.stop()
+            if "Ref" not in imported_df.columns:
+                st.error("Ref ya Marketing column nahi mila")
+                st.stop()
 
-        if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
-            imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
+            if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
+                imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
 
-        for col in df_master.columns:
-            if col not in imported_df.columns:
-                imported_df[col] = ""
+            for col in df_master.columns:
+                if col not in imported_df.columns:
+                    imported_df[col] = ""
 
-        final_df = imported_df[df_master.columns].copy()
-        final_df = calculate_metrics_and_alerts(final_df)
+            final_df = imported_df[df_master.columns].copy()
+            final_df = calculate_metrics_and_alerts(final_df)
 
-        if upload_type == "Full Pipeline File":
-            save_all_sheets(final_df)
-            st.success(f"Full Pipeline Loaded: {len(final_df)} samples")
-        else:
-            existing_snos = final_df["S.no"].astype(str).str.strip().tolist()
-            df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
-            df_master = pd.concat([df_master, final_df], ignore_index=True)
-            df_master = calculate_metrics_and_alerts(df_master)
-            save_all_sheets(df_master)
-            st.success(f"✅ Repeat Sheet Loaded: {len(final_df)} samples")
+            if upload_type == "Full Pipeline File":
+                save_all_sheets(final_df)
+                st.success(f"Full Pipeline Loaded: {len(final_df)} samples")
+            else:
+                existing_snos = final_df["S.no"].astype(str).str.strip().tolist()
+                df_master = df_master[~df_master["S.no"].astype(str).str.strip().isin(existing_snos)]
+                df_master = pd.concat([df_master, final_df], ignore_index=True)
+                df_master = calculate_metrics_and_alerts(df_master)
+                save_all_sheets(df_master)
+                st.success(f"✅ Repeat Sheet Loaded: {len(final_df)} samples")
+            
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+
+else:  # Image Upload Mode
+    st.info("📸 Screenshot ya Picture upload karein (Table wali)")
+    uploaded_image = st.file_uploader("Image / Screenshot Upload Karein", type=["png", "jpg", "jpeg"])
+    
+    if uploaded_image:
+        image = Image.open(uploaded_image)
+        st.image(image, caption="Uploaded Image", use_column_width=True)
         
-        st.rerun()
-
-    except Exception as e:
-        st.error(f"Error: {str(e)}")
+        if st.button("💾 Save This Image & Process Later", type="primary"):
+            # Image save kar rahe hain future OCR ke liye
+            image_path = "uploaded_screenshots"
+            os.makedirs(image_path, exist_ok=True)
+            file_name = f"screenshot_{date.today().strftime('%Y%m%d')}_{len(os.listdir(image_path))}.png"
+            image.save(os.path.join(image_path, file_name))
+            
+            st.success(f"✅ Image saved successfully as: {file_name}")
+            st.info("🔄 Note: Abhi image save ho gayi hai. Future update mein isme se data automatically extract ho jayega.")
 
 st.markdown("---")
 
-# ====================== FILTERS ======================
+# ====================== VIEWS WITH DELETE ======================
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy() if len(df_master) > 0 else pd.DataFrame()
 df_dev = df_running[df_running["Source"].str.contains("scratch", case=False, na=False)].copy() if len(df_running) > 0 else pd.DataFrame()
 df_repeat = df_running[~df_running["Source"].str.contains("scratch", case=False, na=False)].copy() if len(df_running) > 0 else pd.DataFrame()
 
-# KPI
 c1, c2, c3 = st.columns(3)
 with c1: st.metric("Total On Floor", len(df_running))
 with c2: st.metric("Development", len(df_dev))
@@ -136,34 +162,31 @@ with c3: st.metric("Repeat", len(df_repeat))
 
 st.markdown("---")
 
-# ====================== VIEWS WITH DELETE OPTION ======================
-st.markdown(f"### Current View: **{st.session_state.current_view}**")
-
 view = st.radio("Section", ["Overall", "Development", "Repeat"], horizontal=True, key="view_selector")
 st.session_state.current_view = view
 
 if st.session_state.current_view == "Overall":
-    st.subheader("📋 All Active Samples (Delete rows easily)")
+    st.subheader("📋 All Active Samples")
     if len(df_running) > 0:
         edited_df = st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall_editor")
         if len(edited_df) < len(df_running):
-            remaining_snos = edited_df["S.no"].astype(str).str.strip().tolist()
-            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining_snos) | 
-                                (df_master["Status"] == "Submitted to marketing")]
+            remaining = edited_df["S.no"].astype(str).str.strip().tolist()
+            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining) | (df_master["Status"] == "Submitted to marketing")]
             save_all_sheets(df_master)
-            st.success("Selected rows deleted!")
+            st.success("Rows deleted!")
             st.rerun()
+
+# Similar logic for Development and Repeat (same as previous)
 
 elif st.session_state.current_view == "Development":
     st.subheader("🧪 Development Section")
     if len(df_dev) > 0:
         edited_df = st.data_editor(df_dev, use_container_width=True, num_rows="dynamic", key="dev_editor")
         if len(edited_df) < len(df_dev):
-            remaining_snos = edited_df["S.no"].astype(str).str.strip().tolist()
-            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining_snos) | 
-                                (df_master["Status"] == "Submitted to marketing")]
+            remaining = edited_df["S.no"].astype(str).str.strip().tolist()
+            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining) | (df_master["Status"] == "Submitted to marketing")]
             save_all_sheets(df_master)
-            st.success("Selected rows deleted!")
+            st.success("Rows deleted!")
             st.rerun()
 
 elif st.session_state.current_view == "Repeat":
@@ -171,15 +194,12 @@ elif st.session_state.current_view == "Repeat":
     if len(df_repeat) > 0:
         edited_df = st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat_editor")
         if len(edited_df) < len(df_repeat):
-            remaining_snos = edited_df["S.no"].astype(str).str.strip().tolist()
-            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining_snos) | 
-                                (df_master["Status"] == "Submitted to marketing")]
+            remaining = edited_df["S.no"].astype(str).str.strip().tolist()
+            df_master = df_master[df_master["S.no"].astype(str).str.strip().isin(remaining) | (df_master["Status"] == "Submitted to marketing")]
             save_all_sheets(df_master)
-            st.success("Selected rows deleted!")
+            st.success("Rows deleted!")
             st.rerun()
 
 # Archive
-st.subheader("📁 Submitted to Marketing (Archive)")
+st.subheader("📁 Archive")
 st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
-
-st.caption("**Kaise Delete Karein:** Data Editor mein left side checkbox tick karein aur keyboard se **Delete** key dabayein.")
