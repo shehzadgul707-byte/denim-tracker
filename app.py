@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, datetime
 import os
 import plotly.express as px
 
@@ -66,8 +66,12 @@ def calculate_metrics_and_alerts(df):
 
         # 3. Running Days Calculation
         try:
-            req_date = pd.to_datetime(df.at[idx, 'Request Date']).date()
-            df.at[idx, 'Pending Days in Process'] = str((today - req_date).days)
+            req_val = df.at[idx, 'Request Date']
+            if req_val and str(req_val).lower() != "nat" and str(req_val).lower() != "nan":
+                req_date = pd.to_datetime(req_val).date()
+                df.at[idx, 'Pending Days in Process'] = str((today - req_date).days)
+            else:
+                df.at[idx, 'Pending Days in Process'] = "0"
         except:
             df.at[idx, 'Pending Days in Process'] = "0"
         
@@ -75,14 +79,18 @@ def calculate_metrics_and_alerts(df):
         status = str(df.at[idx, 'Status']).strip()
         if status != "Submitted to marketing":
             try:
-                del_date = pd.to_datetime(df.at[idx, 'Delivery date']).date()
-                days_left = (del_date - today).days
-                if days_left <= 3 and days_left >= 0:
-                    df.at[idx, 'Alert'] = "⚠️ Critical"
-                elif days_left < 0:
-                    df.at[idx, 'Alert'] = "🚨 Overdue"
+                del_val = df.at[idx, 'Delivery date']
+                if del_val and str(del_val).lower() != "nat" and str(del_val).lower() != "nan":
+                    del_date = pd.to_datetime(del_val).date()
+                    days_left = (del_date - today).days
+                    if days_left <= 3 and days_left >= 0:
+                        df.at[idx, 'Alert'] = "⚠️ Critical"
+                    elif days_left < 0:
+                        df.at[idx, 'Alert'] = "🚨 Overdue"
+                    else:
+                        df.at[idx, 'Alert'] = "Normal"
                 else:
-                    df.at[idx, 'Alert'] = "Normal"
+                    df.at[idx, 'Alert'] = "No Delivery Date"
             except:
                 df.at[idx, 'Alert'] = "No Delivery Date"
         else:
@@ -132,7 +140,6 @@ if uploaded_file and st.button("🚀 Upload & Process Pipeline", type="primary",
             save_all_sheets(final_df)
             st.success(f"🎉 Complete pipeline reset successfully! Loaded {len(final_df)} samples.")
         else:
-            # Safe cross merge for specific updates
             snos_to_update = final_df["S.no"].astype(str).str.strip().tolist()
             df_master = df_master[~df_master["S.no"].isin(snos_to_update)]
             df_master = pd.concat([df_master, final_df], ignore_index=True)
@@ -213,8 +220,13 @@ if len(df_running) > 0:
                     ref = st.text_input("Ref Quality No", value=sample.get("Ref", ""))
                     finish = st.text_input("Finish Type", value=sample.get("Finish", ""))
                     tr_code = st.text_input("TR Code", value=sample.get("TR Code", ""))
-                    source = st.selectbox("Source", ["Scratch", "Existing", "Production beam"], 
-                                          index=["scratch", "existing", "production beam"].index(str(sample.get("Source", "Existing")).lower()) if str(sample.get("Source")).lower() in ["scratch", "existing", "production beam"] else 1)
+                    
+                    # Safe source matching
+                    src_val = str(sample.get("Source", "Existing")).lower().strip()
+                    src_idx = 1
+                    if src_val == "scratch": src_idx = 0
+                    elif src_val == "production beam": src_idx = 2
+                    source = st.selectbox("Source", ["Scratch", "Existing", "Production beam"], index=src_idx)
                 
                 with col2:
                     status = st.selectbox("Pipeline Status Stage", STATUS_OPTIONS, 
@@ -225,10 +237,25 @@ if len(df_running) > 0:
                     shade_txt = st.text_input("Shade Type", value=sample.get("Shade", ""))
                 
                 with col3:
-                    try: req_default = pd.to_datetime(sample.get("Request Date")).date()
-                    except: req_default = date.today()
-                    try: del_default = pd.to_datetime(sample.get("Delivery date")).date()
-                    except: del_default = date.today()
+                    # Robust dates parsing to block pandas NaT / NaN form crashes
+                    req_val = sample.get("Request Date")
+                    del_val = sample.get("Delivery date")
+                    
+                    try:
+                        if req_val and str(req_val).lower() not in ["nat", "nan", ""]:
+                            req_default = pd.to_datetime(req_val).date()
+                        else:
+                            req_default = date.today()
+                    except:
+                        req_default = date.today()
+                        
+                    try:
+                        if del_val and str(del_val).lower() not in ["nat", "nan", ""]:
+                            del_default = pd.to_datetime(del_val).date()
+                        else:
+                            del_default = date.today()
+                    except:
+                        del_default = date.today()
                     
                     req_date = st.date_input("Request Date", value=req_default)
                     del_date = st.date_input("Delivery Date Target", value=del_default)
@@ -270,7 +297,6 @@ if view == "Overall Active View":
         edited_overall = st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall_editor_sync")
         if len(edited_overall) != len(df_running):
             active_snos = edited_overall["S.no"].tolist()
-            # Retain archived but filter out deleted live tracks
             df_master = df_master[(df_master["S.no"].isin(active_snos)) | (df_master["Status"] == "Submitted to marketing")].copy()
             save_all_sheets(df_master)
             st.rerun()
