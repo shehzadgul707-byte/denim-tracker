@@ -98,7 +98,6 @@ df_repeat = df_running[df_running["Source"].str.contains("existing|production", 
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
-# KPI Clickable Boxes
 k1, k2, k3 = st.columns(3)
 with k1:
     if st.button(f"**Total Samples On Floor**\n\n**{len(df_running)}**", use_container_width=True):
@@ -112,7 +111,7 @@ with k3:
 
 st.markdown("---")
 
-# Upload
+# Upload Section
 st.markdown("## 📥 Fresh Excel Upload")
 uploaded_file = st.file_uploader("Excel File Upload Karein", type=["xlsx"], key="uploader")
 
@@ -151,15 +150,11 @@ if st.session_state.current_view == "Overall":
     st.subheader("📋 All Active Samples")
     if len(df_running) > 0:
         st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall")
-    else:
-        st.info("No active samples")
 
 elif st.session_state.current_view == "Development":
     st.subheader("🧪 Development Section (Scratch)")
     if len(df_dev) > 0:
         st.data_editor(df_dev, use_container_width=True, num_rows="dynamic", key="dev")
-    else:
-        st.info("Development section khali hai")
 
 elif st.session_state.current_view == "Repeat":
     st.subheader("🔄 Repeat Section")
@@ -167,22 +162,32 @@ elif st.session_state.current_view == "Repeat":
     if len(df_repeat) > 0:
         st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat_editor")
         
-        st.markdown("### Transfer to Development")
-        # Multi-select for transfer
-        repeat_snos = df_repeat["S.no"].astype(str).str.strip().tolist()
-        selected_snos = st.multiselect(
+        st.markdown("### 🔄 Transfer to Development")
+        
+        # Improved Multi-select with Ref + S.no
+        df_repeat_display = df_repeat.copy()
+        df_repeat_display["Display"] = df_repeat_display["Ref"] + "  |  S.no: " + df_repeat_display["S.no"].astype(str)
+        
+        selected_display = st.multiselect(
             "Transfer karne ke liye samples select karein:",
-            options=repeat_snos,
+            options=df_repeat_display["Display"].tolist(),
             default=[],
-            help="Multiple samples select kar sakte hain"
+            help="Ref ke hisaab se samples choose karein"
         )
         
-        if st.button("🔄 Selected Samples ko Development mein Transfer Karein", type="primary", use_container_width=True):
-            if selected_snos:
+        if st.button("🔄 Selected Samples ko Development mein Transfer Karein", 
+                     type="primary", use_container_width=True):
+            if selected_display:
+                # Extract S.no from selected display text
+                selected_snos = []
+                for item in selected_display:
+                    sno_part = item.split("S.no: ")[-1].strip()
+                    selected_snos.append(sno_part)
+                
                 mask = df_master["S.no"].astype(str).str.strip().isin(selected_snos)
                 df_master.loc[mask, "Source"] = "Scratch"
                 save_all_sheets(df_master)
-                st.success(f"✅ {len(selected_snos)} samples Development section mein transfer ho gaye!")
+                st.success(f"✅ {len(selected_snos)} samples Development mein transfer ho gaye!")
                 st.rerun()
             else:
                 st.warning("Koi sample select nahi kiya!")
@@ -193,4 +198,4 @@ elif st.session_state.current_view == "Repeat":
 st.subheader("📁 Submitted to Marketing (Archive)")
 st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
 
-st.caption("**Note:** Repeat section mein multi-select karke 'Transfer' button dabayein.")
+st.caption("**Note:** Repeat section mein Ref ke hisaab se samples select karke Transfer button dabayein.")
