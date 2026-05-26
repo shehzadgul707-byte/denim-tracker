@@ -19,11 +19,9 @@ COLUMNS_STRUCTURE = [
 if "fresh_uploaded" not in st.session_state:
     st.session_state.fresh_uploaded = False
 
-# ====================== STRONG STRING FIX ======================
-def read_excel_as_string(file):
-    """Excel ko pure string mode mein read karta hai"""
-    df = pd.read_excel(file, dtype=str)  # Sab columns string
-    return df
+# ====================== HELPER FUNCTIONS ======================
+def read_excel_as_string(file_path_or_buffer):
+    return pd.read_excel(file_path_or_buffer, dtype=str)
 
 def clean_dataframe(df):
     df = df.copy()
@@ -42,7 +40,6 @@ def calculate_metrics_and_alerts(df):
         return df.copy()
     
     df = clean_dataframe(df)
-    
     today = date.today()
     df['Current Date'] = today.strftime("%Y-%m-%d")
     
@@ -70,26 +67,33 @@ def calculate_metrics_and_alerts(df):
             df.at[idx, 'Alert'] = "Completed"
     return df
 
-# ====================== LOAD SAVED DATA ======================
-if os.path.exists(EXCEL_FILE) and not st.session_state.fresh_uploaded:
-    try:
-        df_master = pd.read_excel(EXCEL_FILE, sheet_name="Master_Data", dtype=str)
-        df_trials = pd.read_excel(EXCEL_FILE, sheet_name="Trial_Data", dtype=str)
-    except:
-        df_master, df_trials = pd.DataFrame(columns=COLUMNS_STRUCTURE), pd.DataFrame()
-else:
-    df_master, df_trials = pd.DataFrame(columns=COLUMNS_STRUCTURE), pd.DataFrame()
+# ====================== LOAD DATA ======================
+@st.cache_data(ttl=5)  # Fresh data load
+def load_data():
+    if os.path.exists(EXCEL_FILE):
+        try:
+            df_master = pd.read_excel(EXCEL_FILE, sheet_name="Master_Data", dtype=str)
+        except:
+            df_master = pd.DataFrame(columns=COLUMNS_STRUCTURE)
+    else:
+        df_master = pd.DataFrame(columns=COLUMNS_STRUCTURE)
+    
+    df_master = clean_dataframe(df_master)
+    for col in COLUMNS_STRUCTURE:
+        if col not in df_master.columns:
+            df_master[col] = ""
+    
+    df_master = df_master[COLUMNS_STRUCTURE].copy()
+    df_master = calculate_metrics_and_alerts(df_master)
+    return df_master
 
-df_master = clean_dataframe(df_master)
-df_master = df_master.reindex(columns=COLUMNS_STRUCTURE, fill_value="")
-
-df_master = calculate_metrics_and_alerts(df_master)
+df_master = load_data()
 
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy()
 df_dev = df_running[df_running["Source"].str.contains("scratch", case=False, na=False)].copy()
 df_repeat = df_running[df_running["Source"].str.contains("existing|production", case=False, na=False)].copy()
 
-# ====================== MAIN UI ======================
+# ====================== UI ======================
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
@@ -100,30 +104,22 @@ with c3: st.markdown(f"<div style='background:#B45309;padding:20px;border-radius
 
 st.markdown("---")
 
-if st.button("🚨 Wipe Out Everything", use_container_width=True):
-    df_master, df_trials = pd.DataFrame(columns=COLUMNS_STRUCTURE), pd.DataFrame()
-    save_all_sheets(df_master, df_trials)
-    st.session_state.fresh_uploaded = False
-    st.success("Dashboard Reset Ho Gaya!")
-    st.rerun()
-
-# ====================== UPLOAD ======================
+# Upload Section
 st.markdown("## 📥 Fresh Excel Upload")
-uploaded_file = st.file_uploader("Excel File Upload Karein", type=["xlsx"])
+uploaded_file = st.file_uploader("Excel File Upload Karein", type=["xlsx"], key="uploader")
 
 if uploaded_file is not None:
     if st.button("🚀 Process & Replace All Data", type="primary", use_container_width=True):
         try:
-            imported_df = read_excel_as_string(uploaded_file)   # ← Yeh line sabse important hai
+            imported_df = read_excel_as_string(uploaded_file)
             imported_df = clean_dataframe(imported_df)
             
-            if "S.no" not in imported_df.columns or "Ref" not in imported_df.columns:
-                st.error("S.no aur Ref columns hone chahiye")
+            if "Ref" not in imported_df.columns:
+                st.error("Ref column nahi mila")
             else:
                 if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
                     imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
                 
-                # Valid rows
                 valid_df = imported_df[imported_df["Ref"].str.strip() != ""].copy()
                 
                 for col in COLUMNS_STRUCTURE:
@@ -136,13 +132,40 @@ if uploaded_file is not None:
                 save_all_sheets(final_df, pd.DataFrame())
                 st.session_state.fresh_uploaded = True
                 
-                st.success(f"🎉 {len(final_df)} samples successfully load ho gaye!")
+                st.success(f"🎉 {len(final_df)} samples loaded successfully!")
                 st.rerun()
                 
         except Exception as e:
-            st.error(f"Upload Error: {str(e)}")
+            st.error(f"Error: {str(e)}")
 
-st.markdown("---")
-st.info("**Note:** Agar phir bhi error aaye to mujhe batao. Ab yeh code bahut strong hai.")
+# ====================== TABS WITH DATA ======================
+st.markdown("## 🗂️ Active Samples")
 
-# Baaki features (data editor, manual entry etc.) baad mein add kar sakte hain agar yeh upload kaam kar jaye.
+tab1, tab2, tab3 = st.tabs(["📋 Overall", "🧪 Development", "🔄 Repeat"])
+
+with tab1:
+    st.subheader("Overall Active Samples")
+    if len(df_running) > 0:
+        st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall_tab")
+    else:
+        st.info("Koi active sample nahi hai")
+
+with tab2:
+    st.subheader("Development Section (Scratch)")
+    if len(df_dev) > 0:
+        st.data_editor(df_dev, use_container_width=True, num_rows="dynamic", key="dev_tab")
+    else:
+        st.info("Development section khali hai")
+
+with tab3:
+    st.subheader("Repeat Section")
+    if len(df_repeat) > 0:
+        st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat_tab")
+    else:
+        st.info("Repeat section khali hai")
+
+# Archive
+st.subheader("📁 Submitted to Marketing (Archive)")
+st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
+
+st.success("✅ Dashboard Updated! Agar data ab bhi nahi dikh raha to page refresh karo (F5 dabao).")
