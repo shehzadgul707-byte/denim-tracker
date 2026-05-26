@@ -19,6 +19,9 @@ COLUMNS_STRUCTURE = [
 if "fresh_uploaded" not in st.session_state:
     st.session_state.fresh_uploaded = False
 
+if "current_view" not in st.session_state:
+    st.session_state.current_view = "Overall"
+
 # ====================== HELPER FUNCTIONS ======================
 def read_excel_as_string(file_path_or_buffer):
     return pd.read_excel(file_path_or_buffer, dtype=str)
@@ -68,7 +71,6 @@ def calculate_metrics_and_alerts(df):
     return df
 
 # ====================== LOAD DATA ======================
-@st.cache_data(ttl=5)  # Fresh data load
 def load_data():
     if os.path.exists(EXCEL_FILE):
         try:
@@ -97,10 +99,21 @@ df_repeat = df_running[df_running["Source"].str.contains("existing|production", 
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
-c1, c2, c3 = st.columns(3)
-with c1: st.markdown(f"<div style='background:#1E3A8A;padding:20px;border-radius:10px;text-align:center;color:white;'><h2>Total On Floor</h2><h1>{len(df_running)}</h1></div>", unsafe_allow_html=True)
-with c2: st.markdown(f"<div style='background:#0D9488;padding:20px;border-radius:10px;text-align:center;color:white;'><h2>Development</h2><h1>{len(df_dev)}</h1></div>", unsafe_allow_html=True)
-with c3: st.markdown(f"<div style='background:#B45309;padding:20px;border-radius:10px;text-align:center;color:white;'><h2>Repeat</h2><h1>{len(df_repeat)}</h1></div>", unsafe_allow_html=True)
+# KPI Boxes with Click Functionality
+st.markdown("### 📊 Live Floor Workload Counters")
+k1, k2, k3 = st.columns(3)
+
+with k1:
+    if st.button(f"**Total Samples On Floor**\n\n**{len(df_running)}**", use_container_width=True, key="btn_total"):
+        st.session_state.current_view = "Overall"
+
+with k2:
+    if st.button(f"**Development Section**\n\n**{len(df_dev)}**", use_container_width=True, key="btn_dev"):
+        st.session_state.current_view = "Development"
+
+with k3:
+    if st.button(f"**Repeat Section**\n\n**{len(df_repeat)}**", use_container_width=True, key="btn_repeat"):
+        st.session_state.current_view = "Repeat"
 
 st.markdown("---")
 
@@ -131,41 +144,59 @@ if uploaded_file is not None:
                 
                 save_all_sheets(final_df, pd.DataFrame())
                 st.session_state.fresh_uploaded = True
-                
-                st.success(f"🎉 {len(final_df)} samples loaded successfully!")
+                st.success(f"🎉 {len(final_df)} samples loaded!")
                 st.rerun()
-                
         except Exception as e:
             st.error(f"Error: {str(e)}")
 
-# ====================== TABS WITH DATA ======================
-st.markdown("## 🗂️ Active Samples")
+st.markdown("---")
 
-tab1, tab2, tab3 = st.tabs(["📋 Overall", "🧪 Development", "🔄 Repeat"])
+# ====================== DYNAMIC VIEW BASED ON CLICK ======================
+st.markdown(f"### Current View: **{st.session_state.current_view}**")
 
-with tab1:
-    st.subheader("Overall Active Samples")
+if st.session_state.current_view == "Overall":
+    st.subheader("📋 All Active Samples")
     if len(df_running) > 0:
-        st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall_tab")
+        edited = st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall_editor")
+        # Deletion logic can be added later
     else:
-        st.info("Koi active sample nahi hai")
+        st.info("Koi active sample nahi hai.")
 
-with tab2:
-    st.subheader("Development Section (Scratch)")
+elif st.session_state.current_view == "Development":
+    st.subheader("🧪 Development Section (Source: Scratch)")
     if len(df_dev) > 0:
-        st.data_editor(df_dev, use_container_width=True, num_rows="dynamic", key="dev_tab")
+        st.data_editor(df_dev, use_container_width=True, num_rows="dynamic", key="dev_editor")
     else:
-        st.info("Development section khali hai")
+        st.info("Development section mein koi sample nahi hai.")
 
-with tab3:
-    st.subheader("Repeat Section")
+elif st.session_state.current_view == "Repeat":
+    st.subheader("🔄 Repeat Section")
     if len(df_repeat) > 0:
-        st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat_tab")
+        edited_repeat = st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat_editor")
+        
+        # Transfer Button
+        if st.button("🔄 Selected Samples ko Development mein Transfer Karein", type="primary", use_container_width=True):
+            try:
+                # Get current displayed data
+                current_snos = set(df_repeat["S.no"].astype(str).str.strip())
+                remaining_snos = set(edited_repeat["S.no"].astype(str).str.strip())
+                to_transfer = current_snos - remaining_snos
+                
+                if to_transfer:
+                    mask = df_master["S.no"].astype(str).str.strip().isin(to_transfer)
+                    df_master.loc[mask, "Source"] = "Scratch"
+                    save_all_sheets(df_master, pd.DataFrame())
+                    st.success(f"{len(to_transfer)} samples Development section mein transfer ho gaye!")
+                    st.rerun()
+                else:
+                    st.info("Koi sample select nahi kiya (rows delete karke transfer karein)")
+            except:
+                st.error("Transfer mein error aaya. Phir se try karein.")
     else:
-        st.info("Repeat section khali hai")
+        st.info("Repeat section khali hai.")
 
-# Archive
+# Archive at bottom
 st.subheader("📁 Submitted to Marketing (Archive)")
 st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
 
-st.success("✅ Dashboard Updated! Agar data ab bhi nahi dikh raha to page refresh karo (F5 dabao).")
+st.caption("**Tip:** KPI boxes par click karke view change karein. Repeat section mein rows delete karke 'Transfer' button dabaein.")
