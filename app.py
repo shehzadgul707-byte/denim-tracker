@@ -64,11 +64,18 @@ def load_data():
         try:
             df = pd.read_excel(EXCEL_FILE, sheet_name="Master_Data", dtype=str)
             df = clean_dataframe(df)
+            # Agar Category column nahi hai to add kar do
+            if "Category" not in df.columns:
+                df["Category"] = ""
+            return df
         except:
             df = pd.DataFrame()
+            df["Category"] = ""
+            return df
     else:
         df = pd.DataFrame()
-    return df
+        df["Category"] = ""
+        return df
 
 df_master = load_data()
 
@@ -86,7 +93,6 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
         imported_df = read_excel_as_string(uploaded_file)
         imported_df = clean_dataframe(imported_df)
 
-        # Marketing → Ref
         if "Marketing" in imported_df.columns:
             imported_df.rename(columns={"Marketing": "Ref"}, inplace=True)
 
@@ -97,22 +103,13 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
         if "Ppi" in imported_df.columns and "Picks" not in imported_df.columns:
             imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
 
-        # Add missing columns
-        for col in df_master.columns:
+        # Add missing columns including Category
+        for col in list(df_master.columns) + ["Category"]:
             if col not in imported_df.columns:
                 imported_df[col] = ""
 
-        final_df = imported_df[df_master.columns].copy()
+        final_df = imported_df[df_master.columns].copy() if len(df_master) > 0 else imported_df
         final_df = calculate_metrics_and_alerts(final_df)
-
-        # ====================== NEW CATEGORY LOGIC ======================
-        if "Category" in final_df.columns:
-            final_df["Category"] = final_df["Category"].str.strip()
-            st.success("Category column use kiya gaya hai (Development/Repeat)")
-        else:
-            st.warning("Category column nahi mila. Purane logic se classify kar raha hun.")
-            final_df["Category"] = final_df["Source"].str.contains("scratch", case=False, na=False)
-            final_df["Category"] = final_df["Category"].map({True: "Development", False: "Repeat"})
 
         if upload_type == "Full Pipeline File":
             save_all_sheets(final_df)
@@ -135,9 +132,13 @@ st.markdown("---")
 # ====================== CLASSIFICATION ======================
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy() if len(df_master) > 0 else pd.DataFrame()
 
-# **New Logic**: Category column ke basis par
-df_dev = df_running[df_running["Category"].str.contains("development", case=False, na=False)].copy()
-df_repeat = df_running[df_running["Category"].str.contains("repeat", case=False, na=False)].copy()
+# Safe Category Check
+if "Category" in df_running.columns:
+    df_dev = df_running[df_running["Category"].str.contains("development", case=False, na=False)].copy()
+    df_repeat = df_running[df_running["Category"].str.contains("repeat", case=False, na=False)].copy()
+else:
+    df_dev = pd.DataFrame()
+    df_repeat = df_running.copy()
 
 # KPI
 c1, c2, c3 = st.columns(3)
@@ -145,9 +146,9 @@ with c1: st.metric("Total On Floor", len(df_running))
 with c2: st.metric("Development", len(df_dev))
 with c3: st.metric("Repeat", len(df_repeat))
 
-st.info("**Note:** Ab classification 'Category' column ke basis par ho raha hai (Development / Repeat)")
+st.info("**Classification:** 'Category' column ke basis par (Development / Repeat)")
 
-# Views
+# Views with Delete Option
 view = st.radio("Section", ["Overall", "Development", "Repeat"], horizontal=True, key="view_selector")
 
 if view == "Overall":
