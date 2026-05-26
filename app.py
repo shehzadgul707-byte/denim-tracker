@@ -32,11 +32,10 @@ def clean_dataframe(df):
         df[col] = df[col].fillna("").astype(str).str.strip()
     return df
 
-def save_all_sheets(df_master, df_trials):
+def save_all_sheets(df_master):
     df_master = clean_dataframe(df_master)
     with pd.ExcelWriter(EXCEL_FILE, engine="openpyxl") as writer:
         df_master.to_excel(writer, sheet_name="Master_Data", index=False)
-        df_trials.to_excel(writer, sheet_name="Trial_Data", index=False)
 
 def calculate_metrics_and_alerts(df):
     if len(df) == 0:
@@ -99,25 +98,21 @@ df_repeat = df_running[df_running["Source"].str.contains("existing|production", 
 st.title("👖 Denim Fabric R&D Production Pipeline Tracker")
 st.markdown("---")
 
-# KPI Boxes with Click Functionality
-st.markdown("### 📊 Live Floor Workload Counters")
+# KPI Clickable Boxes
 k1, k2, k3 = st.columns(3)
-
 with k1:
-    if st.button(f"**Total Samples On Floor**\n\n**{len(df_running)}**", use_container_width=True, key="btn_total"):
+    if st.button(f"**Total Samples On Floor**\n\n**{len(df_running)}**", use_container_width=True):
         st.session_state.current_view = "Overall"
-
 with k2:
-    if st.button(f"**Development Section**\n\n**{len(df_dev)}**", use_container_width=True, key="btn_dev"):
+    if st.button(f"**Development Section**\n\n**{len(df_dev)}**", use_container_width=True):
         st.session_state.current_view = "Development"
-
 with k3:
-    if st.button(f"**Repeat Section**\n\n**{len(df_repeat)}**", use_container_width=True, key="btn_repeat"):
+    if st.button(f"**Repeat Section**\n\n**{len(df_repeat)}**", use_container_width=True):
         st.session_state.current_view = "Repeat"
 
 st.markdown("---")
 
-# Upload Section
+# Upload
 st.markdown("## 📥 Fresh Excel Upload")
 uploaded_file = st.file_uploader("Excel File Upload Karein", type=["xlsx"], key="uploader")
 
@@ -134,7 +129,6 @@ if uploaded_file is not None:
                     imported_df.rename(columns={"Ppi": "Picks"}, inplace=True)
                 
                 valid_df = imported_df[imported_df["Ref"].str.strip() != ""].copy()
-                
                 for col in COLUMNS_STRUCTURE:
                     if col not in valid_df.columns:
                         valid_df[col] = ""
@@ -142,8 +136,7 @@ if uploaded_file is not None:
                 final_df = valid_df[COLUMNS_STRUCTURE].copy()
                 final_df = calculate_metrics_and_alerts(final_df)
                 
-                save_all_sheets(final_df, pd.DataFrame())
-                st.session_state.fresh_uploaded = True
+                save_all_sheets(final_df)
                 st.success(f"🎉 {len(final_df)} samples loaded!")
                 st.rerun()
         except Exception as e:
@@ -151,52 +144,53 @@ if uploaded_file is not None:
 
 st.markdown("---")
 
-# ====================== DYNAMIC VIEW BASED ON CLICK ======================
+# Dynamic View
 st.markdown(f"### Current View: **{st.session_state.current_view}**")
 
 if st.session_state.current_view == "Overall":
     st.subheader("📋 All Active Samples")
     if len(df_running) > 0:
-        edited = st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall_editor")
-        # Deletion logic can be added later
+        st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall")
     else:
-        st.info("Koi active sample nahi hai.")
+        st.info("No active samples")
 
 elif st.session_state.current_view == "Development":
-    st.subheader("🧪 Development Section (Source: Scratch)")
+    st.subheader("🧪 Development Section (Scratch)")
     if len(df_dev) > 0:
-        st.data_editor(df_dev, use_container_width=True, num_rows="dynamic", key="dev_editor")
+        st.data_editor(df_dev, use_container_width=True, num_rows="dynamic", key="dev")
     else:
-        st.info("Development section mein koi sample nahi hai.")
+        st.info("Development section khali hai")
 
 elif st.session_state.current_view == "Repeat":
     st.subheader("🔄 Repeat Section")
+    
     if len(df_repeat) > 0:
-        edited_repeat = st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat_editor")
+        st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat_editor")
         
-        # Transfer Button
+        st.markdown("### Transfer to Development")
+        # Multi-select for transfer
+        repeat_snos = df_repeat["S.no"].astype(str).str.strip().tolist()
+        selected_snos = st.multiselect(
+            "Transfer karne ke liye samples select karein:",
+            options=repeat_snos,
+            default=[],
+            help="Multiple samples select kar sakte hain"
+        )
+        
         if st.button("🔄 Selected Samples ko Development mein Transfer Karein", type="primary", use_container_width=True):
-            try:
-                # Get current displayed data
-                current_snos = set(df_repeat["S.no"].astype(str).str.strip())
-                remaining_snos = set(edited_repeat["S.no"].astype(str).str.strip())
-                to_transfer = current_snos - remaining_snos
-                
-                if to_transfer:
-                    mask = df_master["S.no"].astype(str).str.strip().isin(to_transfer)
-                    df_master.loc[mask, "Source"] = "Scratch"
-                    save_all_sheets(df_master, pd.DataFrame())
-                    st.success(f"{len(to_transfer)} samples Development section mein transfer ho gaye!")
-                    st.rerun()
-                else:
-                    st.info("Koi sample select nahi kiya (rows delete karke transfer karein)")
-            except:
-                st.error("Transfer mein error aaya. Phir se try karein.")
+            if selected_snos:
+                mask = df_master["S.no"].astype(str).str.strip().isin(selected_snos)
+                df_master.loc[mask, "Source"] = "Scratch"
+                save_all_sheets(df_master)
+                st.success(f"✅ {len(selected_snos)} samples Development section mein transfer ho gaye!")
+                st.rerun()
+            else:
+                st.warning("Koi sample select nahi kiya!")
     else:
         st.info("Repeat section khali hai.")
 
-# Archive at bottom
+# Archive
 st.subheader("📁 Submitted to Marketing (Archive)")
 st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
 
-st.caption("**Tip:** KPI boxes par click karke view change karein. Repeat section mein rows delete karke 'Transfer' button dabaein.")
+st.caption("**Note:** Repeat section mein multi-select karke 'Transfer' button dabayein.")
