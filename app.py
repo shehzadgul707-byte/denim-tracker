@@ -16,9 +16,6 @@ if "fresh_uploaded" not in st.session_state:
 if "current_view" not in st.session_state:
     st.session_state.current_view = "Overall"
 
-if "editing_sno" not in st.session_state:
-    st.session_state.editing_sno = None
-
 # ====================== HELPERS ======================
 def read_excel_as_string(file):
     return pd.read_excel(file, dtype=str)
@@ -172,12 +169,12 @@ with col3:
 
 st.markdown("---")
 
-# ====================== EDIT SAMPLE FEATURE ======================
+# ====================== EDIT SAMPLE FEATURE (Fixed) ======================
 st.subheader("✏️ Edit Any Sample")
 
 all_active = df_running.copy()
 if len(all_active) > 0:
-    all_active["Display"] = all_active["S.no"].astype(str) + " - " + all_active["Ref"].astype(str) + " (" + all_active["Brand"].astype(str) + ")"
+    all_active["Display"] = all_active["S.no"].astype(str) + " - " + all_active["Ref"].astype(str)
     
     selected_display = st.selectbox("Select Sample to Edit", options=all_active["Display"].tolist())
     
@@ -188,8 +185,8 @@ if len(all_active) > 0:
         if not sample_row.empty:
             sample = sample_row.iloc[0]
             
-            with st.form("edit_sample_form", clear_on_submit=False):
-                st.write(f"**Editing: S.no {selected_sno} | {sample.get('Ref', '')}**")
+            with st.form("edit_sample_form"):
+                st.write(f"**Editing Sample: S.no {selected_sno}**")
                 
                 col1, col2, col3 = st.columns(3)
                 
@@ -201,7 +198,8 @@ if len(all_active) > 0:
                 
                 with col2:
                     source = st.selectbox("Source", ["Existing", "Scratch", "Production beam"], 
-                                        index=0)
+                                        index=["Existing", "Scratch", "Production beam"].index(sample.get("Source", "Scratch")) 
+                                        if sample.get("Source") in ["Existing", "Scratch", "Production beam"] else 1)
                     category = st.selectbox("Category", ["Development", "Repeat"], 
                                           index=0 if str(sample.get("Category", "")).lower() == "development" else 1)
                     status = st.selectbox("Status", STATUS_OPTIONS, 
@@ -209,28 +207,40 @@ if len(all_active) > 0:
                                         if sample.get("Status") in STATUS_OPTIONS else 0)
                 
                 with col3:
-                    req_date = st.date_input("Request Date", 
-                                           value=pd.to_datetime(sample.get("Request Date")).date() 
-                                           if pd.notna(sample.get("Request Date")) else date.today())
-                    del_date = st.date_input("Delivery Date", 
-                                           value=pd.to_datetime(sample.get("Delivery date")).date() 
-                                           if pd.notna(sample.get("Delivery date")) else date.today())
+                    # Safe Date Handling
+                    try:
+                        req_default = pd.to_datetime(sample.get("Request Date")).date()
+                    except:
+                        req_default = date.today()
+                    
+                    try:
+                        del_default = pd.to_datetime(sample.get("Delivery date")).date()
+                    except:
+                        del_default = date.today()
+                    
+                    req_date = st.date_input("Request Date", value=req_default)
+                    del_date = st.date_input("Delivery Date", value=del_default)
                     remarks = st.text_area("Remarks", value=sample.get("Remarks", ""))
                 
-                submitted = st.form_submit_button("💾 Save Changes", use_container_width=True)
-                
-                if submitted:
+                if st.form_submit_button("💾 Save Changes", use_container_width=True):
                     mask = df_master["S.no"].astype(str) == selected_sno
-                    df_master.loc[mask, ["Brand", "Ref", "Finish", "TR Code", "Source", 
-                                       "Category", "Status", "Request Date", "Delivery date", "Remarks"]] = [
-                        brand, ref, finish, tr_code, source, category, status, str(req_date), str(del_date), remarks
-                    ]
+                    df_master.loc[mask, "Brand"] = brand
+                    df_master.loc[mask, "Ref"] = ref
+                    df_master.loc[mask, "Finish"] = finish
+                    df_master.loc[mask, "TR Code"] = tr_code
+                    df_master.loc[mask, "Source"] = source
+                    df_master.loc[mask, "Category"] = category
+                    df_master.loc[mask, "Status"] = status
+                    df_master.loc[mask, "Request Date"] = str(req_date)
+                    df_master.loc[mask, "Delivery date"] = str(del_date)
+                    df_master.loc[mask, "Remarks"] = remarks
+                    
                     df_master = calculate_metrics_and_alerts(df_master)
                     save_all_sheets(df_master)
                     st.success("✅ Sample Updated Successfully!")
                     st.rerun()
 else:
-    st.info("No active samples available to edit.")
+    st.info("No active samples to edit.")
 
 # ====================== TABS ======================
 view = st.radio("View Section", ["Overall", "Development", "Repeat"], horizontal=True)
