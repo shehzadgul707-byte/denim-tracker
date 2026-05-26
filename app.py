@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 import os
+import plotly.express as px
 
 st.set_page_config(page_title="Denim R&D Advanced Tracker", layout="wide")
 
@@ -118,34 +119,26 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
         if upload_type == "Full Pipeline File":
             save_all_sheets(final_df)
             st.success(f"Full Pipeline Loaded: {len(final_df)} samples")
-        
-        else:  # ================= ONLY REPEAT =================
+        else:
             if "Category" in final_df.columns:
                 final_df["Category"] = final_df["Category"].str.strip()
             else:
                 final_df["Category"] = "Repeat"
 
-            # Sirf Repeat category wale samples lo
             new_repeat = final_df[final_df["Category"].str.contains("repeat", case=False, na=False)].copy()
             
             if len(new_repeat) > 0:
                 snos_to_update = new_repeat["S.no"].astype(str).str.strip().tolist()
-                
-                # **Important Fix**: Sirf woh samples delete karo jo Repeat category ke saath update ho rahe hain
-                # Development wale samples safe rahenge
                 df_master = df_master[~(
                     df_master["S.no"].astype(str).str.strip().isin(snos_to_update) & 
                     df_master["Category"].str.contains("repeat", case=False, na=False)
                 )]
-                
-                # Naye Repeat samples add karo
                 df_master = pd.concat([df_master, new_repeat], ignore_index=True)
                 df_master = calculate_metrics_and_alerts(df_master)
                 save_all_sheets(df_master)
-                
-                st.success(f"✅ {len(new_repeat)} Repeat samples added/updated. Development samples safe hain.")
+                st.success(f"✅ {len(new_repeat)} Repeat samples updated!")
             else:
-                st.warning("Koi Repeat category sample nahi mila.")
+                st.warning("Koi Repeat sample nahi mila.")
 
         st.rerun()
 
@@ -154,21 +147,48 @@ if uploaded_file and st.button("🚀 Upload & Process", type="primary", use_cont
 
 st.markdown("---")
 
-# ====================== DISPLAY ======================
+# ====================== GRAPHS ======================
 df_running = df_master[df_master["Status"] != "Submitted to marketing"].copy() if len(df_master) > 0 else pd.DataFrame()
 
 df_dev = df_running[df_running.get("Category", pd.Series("")).str.contains("development", case=False, na=False)].copy()
 df_repeat = df_running[df_running.get("Category", pd.Series("")).str.contains("repeat", case=False, na=False)].copy()
 
-c1, c2, c3 = st.columns(3)
-with c1: st.metric("Total On Floor", len(df_running))
-with c2: st.metric("Development", len(df_dev))
-with c3: st.metric("Repeat", len(df_repeat))
+# KPI + Graphs
+st.markdown("### 📊 Live Dashboard")
 
-view = st.radio("Section", ["Overall", "Development", "Repeat"], horizontal=True)
+col1, col2, col3 = st.columns([1, 2, 2])
+
+with col1:
+    st.metric("**Total On Floor**", len(df_running))
+
+with col2:
+    fig_pie = px.pie(
+        names=['Development', 'Repeat'],
+        values=[len(df_dev), len(df_repeat)],
+        title="Development vs Repeat",
+        color_discrete_sequence=['#0D9488', '#B45309']
+    )
+    st.plotly_chart(fig_pie, use_container_width=True)
+
+with col3:
+    fig_bar = px.bar(
+        x=['Development', 'Repeat'],
+        y=[len(df_dev), len(df_repeat)],
+        text=[len(df_dev), len(df_repeat)],
+        title="Development vs Repeat (Bar Chart)",
+        color=['Development', 'Repeat'],
+        color_discrete_sequence=['#0D9488', '#B45309']
+    )
+    fig_bar.update_traces(textposition='auto')
+    st.plotly_chart(fig_bar, use_container_width=True)
+
+st.markdown("---")
+
+# Views
+view = st.radio("Section", ["Overall", "Development", "Repeat"], horizontal=True, key="view_selector")
 
 if view == "Overall":
-    st.subheader("All Active Samples")
+    st.subheader("📋 All Active Samples")
     if len(df_running) > 0:
         st.data_editor(df_running, use_container_width=True, num_rows="dynamic", key="overall")
 
@@ -182,5 +202,5 @@ elif view == "Repeat":
     if len(df_repeat) > 0:
         st.data_editor(df_repeat, use_container_width=True, num_rows="dynamic", key="repeat")
 
-st.subheader("📁 Archive")
+st.subheader("📁 Archive (Submitted to Marketing)")
 st.dataframe(df_master[df_master["Status"] == "Submitted to marketing"], use_container_width=True)
