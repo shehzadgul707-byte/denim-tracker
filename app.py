@@ -169,7 +169,7 @@ with col3:
 
 st.markdown("---")
 
-# ====================== EDIT SAMPLE FEATURE (Fixed) ======================
+# ====================== EDIT SAMPLE (Fixed) ======================
 st.subheader("✏️ Edit Any Sample")
 
 all_active = df_running.copy()
@@ -198,8 +198,7 @@ if len(all_active) > 0:
                 
                 with col2:
                     source = st.selectbox("Source", ["Existing", "Scratch", "Production beam"], 
-                                        index=["Existing", "Scratch", "Production beam"].index(sample.get("Source", "Scratch")) 
-                                        if sample.get("Source") in ["Existing", "Scratch", "Production beam"] else 1)
+                                        index=1)
                     category = st.selectbox("Category", ["Development", "Repeat"], 
                                           index=0 if str(sample.get("Category", "")).lower() == "development" else 1)
                     status = st.selectbox("Status", STATUS_OPTIONS, 
